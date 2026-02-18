@@ -1,0 +1,34 @@
+id: PHP-DESER-001
+name: PHP Object Injection via unserialize
+language: php
+severity: critical
+cwe: CWE-502
+category: deserialization
+
+query: |
+  cpg.call(".*unserialize.*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.call('.*\\$_GET.*')"
+    description: "$_GET superglobal"
+  - pattern: "cpg.call('.*\\$_POST.*')"
+    description: "$_POST superglobal"
+  - pattern: "cpg.call('.*\\$_COOKIE.*')"
+    description: "$_COOKIE superglobal"
+
+sinks:
+  - pattern: "cpg.call('.*unserialize.*')"
+    description: "unserialize()"
+
+sanitizers:
+  - pattern: "allowed_classes option in unserialize()"
+  - pattern: "JSON decode instead of unserialize"
+  - pattern: "HMAC signature verification before deserialization"
+
+guided_questions:
+  - "Is user-controlled data passed directly to unserialize()?"
+  - "Is the allowed_classes option used to restrict deserializable classes?"
+  - "Are there magic methods (__wakeup, __destruct, __toString) in classes that could be abused?"
+  - "Is there an integrity check (HMAC/signature) on the serialized data?"

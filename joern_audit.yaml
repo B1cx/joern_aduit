@@ -1,0 +1,35 @@
+# DeepAudit Configuration Example
+# This file shows how to configure rate limiting and concurrency
+
+llm:
+  provider: claude
+  model: claude-opus-4-6
+  api_key: sk-ant-oat01-hqaTbh63wv3soArnBq4aMAgTZLVU4jQYsFI7BJ53KmmGS8RUzrlBIIx-a8Y-sz_UqjkvgXFAOpmjoYtb8UNh3Pxan4kWBAA
+  base_url: https://code.newcli.com/claude/droid
+
+  # 关键设置（避免 429 和防火墙策略）
+  parallel_agents: false  # 单个候选内串行（避免并发翻倍）
+  max_concurrent: 2       # 最多同时验证2个候选项（更保守，避免429）
+  rate_limit_rpm: 30      # 30 RPM（保守）
+  max_retries: 3          # 自动重试 3 次
+
+  # Token Budget
+  token_budget:
+    per_candidate: 8000
+    per_explorer: 12000
+    max_context_rounds: 3
+
+scan:
+  mode: standard  # quick, standard, deep, joern-only
+  languages:
+    - java
+  rules_dir: rules
+  prompts_dir: prompts
+  max_rounds: 2
+
+report:
+  output_dir: .joern_audit/reports
+  formats:
+    - markdown-zh
+    - json
+    - sarif

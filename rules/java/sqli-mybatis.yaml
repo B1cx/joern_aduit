@@ -1,0 +1,104 @@
+id: JAVA-SQLI-002
+name: MyBatis SQL Injection via ${} String Substitution
+language: java
+severity: high
+cwe: CWE-89
+category: injection
+
+# BOTTOM-UP ANALYSIS STRATEGY (Sink-to-Source)
+# 1. Find MyBatis ${} usages (SINK - dangerous string substitution)
+# 2. Extract parameter names from ${paramName}
+# 3. Trace back to mapper method parameters
+# 4. Check if parameters flow from user-controllable sources
+# 5. Check for sanitization/validation in between
+
+# Step 1: Find all ${} usages in MyBatis annotations and XML
+query: |
+  cpg.annotation(".*(?:Select|Insert|Update|Delete).*")
+    .where(_.code(".*\\$\\{.*\\}.*"))
+    .method
+    .l
+
+sources:
+  - pattern: "cpg.method.parameter.annotation(\".*(?:RequestParam|RequestBody|PathVariable|RequestHeader).*\")"
+    description: "Spring controller request parameters (user-controllable)"
+  - pattern: "cpg.call(\".*(?:getParameter|getRequestBody|getHeader).*\")"
+    description: "Servlet request data extraction (user-controllable)"
+  - pattern: "cpg.method.parameter"
+    description: "Any method parameter (check if ultimately user-controllable)"
+
+sinks:
+  - pattern: "@Select/@Insert/@Update/@Delete annotations with ${}"
+    description: "MyBatis annotations using ${} string substitution"
+  - pattern: "XML mapper <select>/<insert>/<update>/<delete> with ${}"
+    description: "MyBatis XML mapper using ${} or ${_parameter}"
+
+sanitizers:
+  - pattern: "MyBatis #{} parameterized binding (SAFE - not ${})"
+  - pattern: "Input validation / whitelist check before mapper call"
+  - pattern: "SQL escape functions (SecurityUtil.sqlFilter, etc.)"
+  - pattern: "Enum/constant value (not user-controllable)"
+
+guided_questions:
+  - "从Mapper的 ${paramName} 往上追溯，这个参数最终来源是哪里？"
+  - "该参数是否来自HTTP请求（@RequestParam/@RequestBody等）？"
+  - "在到达Mapper之前，是否有验证/过滤逻辑？过滤逻辑在哪个文件的哪一行？"
+  - "如果有过滤，能否被绕过？（例如：只过滤单引号但ORDER BY不需要引号）"
+  - "对于ORDER BY场景的 ${order}，是否有列名白名单验证？"
+  - "该参数是否可能是常量、枚举或其他非用户可控的值？"
+
+description: |
+  MyBatis SQL注入检测策略（自底向上）：
+
+  检测流程：
+  1. 在Mapper中找到 ${} 使用点（Sink）
+  2. 提取参数名（如 ${username}, ${order}, ${_parameter}）
+  3. 反向追溯到Controller/Service层
+  4. 检查参数来源是否用户可控
+  5. 检查中间是否有有效的过滤/验证
+
+  危险模式（UNSAFE - 使用 ${}）：
+
+  A. 注解方式：
+  ```java
+  @Select("SELECT * FROM users WHERE username = '${username}'")
+  List<User> findByUserNameVuln01(@Param("username") String username);
+  ```
+
+  B. XML方式：
+  ```xml
+  <select id="findByUserNameVuln02" parameterType="String" resultMap="User">
+    SELECT * FROM users WHERE username LIKE '%${_parameter}%'
+  </select>
+  ```
+
+  C. ORDER BY注入：
+  ```xml
+  <select id="findByUserNameVuln03">
+    SELECT * FROM users
+    <if test="order != null">
+      order by ${order} asc
+    </if>
+  </select>
+  ```
+
+  安全模式（SAFE - 使用 #{}）：
+  ```java
+  @Select("SELECT * FROM users WHERE username = #{username}")
+  User findByUserName(@Param("username") String username);
+  ```
+
+  常见误报场景（需要LLM验证）：
+  - ${} 参数是枚举/常量，非用户可控
+  - ${} 参数经过白名单验证（如SecurityUtil.sqlFilter）
+  - ${} 用于ORDER BY但有严格列名白名单
+
+  攻击示例：
+  1. 普通注入: username=' OR '1'='1
+  2. LIKE注入: username=abc%' OR '1'='1 --
+  3. ORDER BY注入: order=id DESC; DROP TABLE users--
+
+  修复方案：
+  - 优先：将 ${} 改为 #{} （适用于WHERE/LIKE等场景）
+  - 次选：添加严格的白名单验证（适用于ORDER BY场景）
+  - 备选：使用SQL转义函数（但仍有绕过风险）

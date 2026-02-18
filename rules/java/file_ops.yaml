@@ -1,0 +1,36 @@
+id: JAVA-FILE-001
+name: Path Traversal in File Operations
+language: java
+severity: high
+cwe: CWE-22
+category: file_ops
+
+query: |
+  cpg.call(".*(?:FileInputStream|FileOutputStream|File|Files\\.read|Files\\.write|Files\\.copy).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.annotation('.*Mapping.*').method.parameter"
+    description: "Spring Controller method parameters"
+  - pattern: "cpg.call('.*getOriginalFilename.*')"
+    description: "MultipartFile.getOriginalFilename()"
+
+sinks:
+  - pattern: "cpg.call('.*new File\\(.*')"
+    description: "File constructor"
+  - pattern: "cpg.call('.*Files\\.read.*')"
+    description: "java.nio.file.Files read operations"
+  - pattern: "cpg.call('.*FileInputStream.*')"
+    description: "FileInputStream constructor"
+
+sanitizers:
+  - pattern: "Path canonicalization + prefix check"
+  - pattern: "Filename sanitization (strip ../ and special chars)"
+  - pattern: "Chroot / jail directory restriction"
+
+guided_questions:
+  - "Can the user control the file path or filename?"
+  - "Is the path canonicalized before use (Path.normalize, getCanonicalPath)?"
+  - "Is there a base directory check to prevent directory traversal?"
+  - "For file uploads: is the original filename used directly or regenerated?"

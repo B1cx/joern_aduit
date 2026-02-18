@@ -1,0 +1,38 @@
+id: PHP-RCE-001
+name: Remote Code Execution via Command/Code Injection
+language: php
+severity: critical
+cwe: CWE-78
+category: injection
+
+query: |
+  cpg.call(".*(?:system|exec|passthru|shell_exec|popen|proc_open|eval|assert|preg_replace).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.call('.*\\$_GET.*')"
+    description: "$_GET superglobal"
+  - pattern: "cpg.call('.*\\$_POST.*')"
+    description: "$_POST superglobal"
+
+sinks:
+  - pattern: "cpg.call('.*system.*')"
+    description: "system()"
+  - pattern: "cpg.call('.*exec.*')"
+    description: "exec()"
+  - pattern: "cpg.call('.*eval.*')"
+    description: "eval()"
+  - pattern: "cpg.call('.*passthru.*')"
+    description: "passthru()"
+
+sanitizers:
+  - pattern: "escapeshellarg() / escapeshellcmd()"
+  - pattern: "Command allowlist"
+  - pattern: "disable_functions in php.ini"
+
+guided_questions:
+  - "Can user input reach the command/eval execution without sanitization?"
+  - "Is escapeshellarg() or escapeshellcmd() applied to all user-controlled parts?"
+  - "Is the dangerous function in a code path reachable from the web interface?"
+  - "Are there disable_functions restrictions in the PHP configuration?"

@@ -1,0 +1,36 @@
+id: JAVA-SSRF-001
+name: Server-Side Request Forgery
+language: java
+severity: high
+cwe: CWE-918
+category: ssrf
+
+query: |
+  cpg.call(".*(?:URL|HttpClient|RestTemplate|WebClient|OkHttpClient|Jsoup).*(?:openConnection|execute|getForObject|get|newCall|connect).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.annotation('.*Mapping.*').method.parameter"
+    description: "Spring Controller method parameters"
+  - pattern: "cpg.call('.*getParameter.*')"
+    description: "HttpServletRequest.getParameter()"
+
+sinks:
+  - pattern: "cpg.call('.*URL.*openConnection.*')"
+    description: "URL.openConnection()"
+  - pattern: "cpg.call('.*RestTemplate.*')"
+    description: "Spring RestTemplate calls"
+  - pattern: "cpg.call('.*HttpClient.*')"
+    description: "Apache HttpClient requests"
+
+sanitizers:
+  - pattern: "URL allowlist / domain whitelist"
+  - pattern: "Protocol restriction (http/https only)"
+  - pattern: "Private IP address blocking"
+
+guided_questions:
+  - "Can the user control the full URL or only parts of it (path, query params)?"
+  - "Is there a URL allowlist or domain whitelist?"
+  - "Are private/internal IP ranges (127.0.0.1, 10.x, 169.254.x) blocked?"
+  - "Can protocol be controlled (file://, gopher://, dict://)?"

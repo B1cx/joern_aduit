@@ -1,0 +1,36 @@
+id: PHP-LFI-001
+name: Local File Inclusion
+language: php
+severity: high
+cwe: CWE-98
+category: file_ops
+
+query: |
+  cpg.call(".*(?:include|include_once|require|require_once|file_get_contents|fopen|readfile).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.call('.*\\$_GET.*')"
+    description: "$_GET superglobal"
+  - pattern: "cpg.call('.*\\$_POST.*')"
+    description: "$_POST superglobal"
+
+sinks:
+  - pattern: "cpg.call('.*include.*')"
+    description: "include/include_once"
+  - pattern: "cpg.call('.*require.*')"
+    description: "require/require_once"
+  - pattern: "cpg.call('.*file_get_contents.*')"
+    description: "file_get_contents()"
+
+sanitizers:
+  - pattern: "Basename extraction (basename())"
+  - pattern: "Path whitelist / allowed directories"
+  - pattern: "open_basedir restriction"
+
+guided_questions:
+  - "Can the user control the file path in include/require?"
+  - "Is the path restricted to a whitelist of allowed files?"
+  - "Can directory traversal (../) bypass path restrictions?"
+  - "Is open_basedir configured to limit accessible directories?"

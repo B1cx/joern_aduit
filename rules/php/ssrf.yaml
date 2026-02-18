@@ -1,0 +1,34 @@
+id: PHP-SSRF-001
+name: Server-Side Request Forgery
+language: php
+severity: high
+cwe: CWE-918
+category: ssrf
+
+query: |
+  cpg.call(".*(?:file_get_contents|curl_exec|fopen|SoapClient|SimpleXMLElement).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.call('.*\\$_GET.*')"
+    description: "$_GET superglobal"
+  - pattern: "cpg.call('.*\\$_POST.*')"
+    description: "$_POST superglobal"
+
+sinks:
+  - pattern: "cpg.call('.*file_get_contents.*')"
+    description: "file_get_contents() with URL"
+  - pattern: "cpg.call('.*curl_exec.*')"
+    description: "cURL execution"
+
+sanitizers:
+  - pattern: "URL allowlist / domain whitelist"
+  - pattern: "Protocol restriction (http/https only)"
+  - pattern: "Private IP blocking (filter_var FILTER_VALIDATE_IP)"
+
+guided_questions:
+  - "Can the user fully control the URL passed to the HTTP function?"
+  - "Is there a URL/domain allowlist?"
+  - "Are internal network addresses (127.0.0.1, 10.x, 192.168.x) blocked?"
+  - "Can the protocol be controlled (file://, gopher://, dict://)?"

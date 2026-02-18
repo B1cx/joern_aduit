@@ -1,0 +1,82 @@
+id: JAVA-DESER-001
+name: Unsafe Deserialization (ObjectInputStream, Fastjson, etc.)
+language: java
+severity: critical
+cwe: CWE-502
+category: deserialization
+
+# Improved query to detect unsafe deserialization
+# Focus on method calls: readObject, parseObject, etc.
+query: |
+  cpg.call(".*(?:readObject|readUnshared|parseObject|parse|fromXML|load).*")
+    .where(_.code(".*(?:ObjectInputStream|XMLDecoder|JSON|Fastjson|Yaml|XStream).*"))
+    .l
+
+sources:
+  - pattern: "cpg.call('.*getInputStream.*')"
+    description: "HTTP request input stream"
+  - pattern: "cpg.method.parameter.typeFullName('.*byte\\[\\].*')"
+    description: "Raw byte array parameters"
+  - pattern: "cpg.call('.*getCookie.*')"
+    description: "Cookie values (e.g., rememberMe)"
+  - pattern: "cpg.call('.*getHeader.*')"
+    description: "HTTP headers"
+
+sinks:
+  - pattern: "cpg.call('.*readObject.*')"
+    description: "ObjectInputStream.readObject() / readUnshared()"
+  - pattern: "cpg.call('.*XMLDecoder.*')"
+    description: "XMLDecoder.readObject()"
+  - pattern: "cpg.call('.*parseObject.*')"
+    description: "Fastjson JSON.parseObject() with autoType"
+  - pattern: "cpg.call('.*parse.*')"
+    description: "JSON parsing methods"
+  - pattern: "cpg.call('.*fromXML.*')"
+    description: "XStream.fromXML()"
+  - pattern: "cpg.call('.*load')"
+    description: "Yaml.load() without SafeConstructor"
+
+sanitizers:
+  - pattern: "ObjectInputFilter / deserialization whitelist"
+  - pattern: "Custom ObjectInputStream with class filtering (e.g., AntObjectInputStream)"
+  - pattern: "Look-ahead deserialization pattern"
+  - pattern: "Fastjson with autoType disabled or safeMode"
+  - pattern: "Yaml with SafeConstructor"
+
+guided_questions:
+  - "反序列化的数据来源是否不可信（网络请求、Cookie、用户上传）？"
+  - "是否有ObjectInputFilter或类白名单限制可反序列化的类型？"
+  - "使用的是哪个序列化库？版本是否存在已知漏洞？"
+  - "Classpath中是否有已知的gadget chain（Commons Collections, Spring等）？"
+  - "对于Fastjson，是否启用了autoType？是否可以通过@type指定任意类？"
+  - "对于SnakeYAML，是否使用了SafeConstructor？"
+  - "是否有自定义的反序列化过滤器（如AntObjectInputStream）？"
+
+description: |
+  检测不安全反序列化漏洞：
+
+  1. Java原生反序列化：
+     - ObjectInputStream.readObject(untrustedData)
+     - 需要gadget chain（如Commons Collections）
+     - 示例：Shiro rememberMe反序列化
+
+  2. Fastjson反序列化RCE：
+     - JSON.parseObject(userJson) with autoType
+     - @type指定恶意类触发RCE
+     - TemplatesImpl gadget等
+
+  3. SnakeYAML反序列化：
+     - new Yaml().load(userYaml)
+     - 使用!!标签指定恶意类
+     - 需要使用SafeConstructor
+
+  4. XStream反序列化：
+     - xstream.fromXML(userXml)
+     - XML注入恶意类
+
+  安全实践：
+  - 避免反序列化不可信数据
+  - 使用ObjectInputFilter白名单
+  - Fastjson禁用autoType或使用safeMode
+  - Yaml使用SafeConstructor
+  - 更新到安全版本

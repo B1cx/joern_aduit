@@ -1,0 +1,34 @@
+# ===== 编译产物 =====
+joern_audit
+joern_audit.exe
+bin/
+
+# ===== 配置文件（含 API Key）=====
+joern_audit.yaml
+
+# ===== 扫描运行时产物 =====
+.joern_audit/
+workspace/
+scan_output_*.log
+
+# ===== 根目录临时报告 =====
+audit_report_*.md
+audit_report_*.json
+audit_report_*.sarif
+
+# ===== Go 工具链 =====
+vendor/
+*.test
+*.out
+coverage.html
+
+# ===== macOS =====
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.swp
+*.swo

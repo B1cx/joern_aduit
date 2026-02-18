@@ -1,0 +1,67 @@
+id: JAVA-RCE-001
+name: Remote Code Execution via Runtime/ProcessBuilder/ScriptEngine
+language: java
+severity: critical
+cwe: CWE-78
+category: injection
+
+# Improved query to detect various RCE patterns
+# Split into multiple patterns for better coverage
+query: |
+  cpg.call(".*(?:exec|start|eval|evaluate|load).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.annotation('.*Mapping.*').method.parameter"
+    description: "Spring Controller method parameters"
+  - pattern: "cpg.call('.*getParameter.*')"
+    description: "HttpServletRequest.getParameter()"
+  - pattern: "cpg.call('.*getRequestBody.*')"
+    description: "HTTP request body parameters"
+
+sinks:
+  - pattern: "cpg.call('.*exec.*')"
+    description: "Runtime.exec() - command execution"
+  - pattern: "cpg.call('.*start')"
+    description: "ProcessBuilder.start() - process creation"
+  - pattern: "cpg.call('.*eval.*')"
+    description: "ScriptEngine.eval() - JavaScript/script execution"
+  - pattern: "cpg.call('.*evaluate.*')"
+    description: "GroovyShell.evaluate() - Groovy script execution"
+  - pattern: "cpg.call('.*load')"
+    description: "Yaml.load() / ScriptEngine.load() - potentially unsafe loading"
+
+sanitizers:
+  - pattern: "Command whitelist / allowlist check"
+  - pattern: "Input restricted to alphanumeric characters"
+  - pattern: "SafeConstructor for SnakeYAML"
+  - pattern: "SecurityManager / sandbox for script engines"
+
+guided_questions:
+  - "用户输入是否能够到达命令执行点？中间是否有过滤？"
+  - "是否有命令白名单限制可执行的命令？"
+  - "是否过滤了Shell元字符 (;|&$`\\n)？"
+  - "对于脚本引擎，是否配置了沙箱或SecurityManager？"
+  - "对于SnakeYAML，是否使用了SafeConstructor而非默认构造器？"
+  - "执行是否需要提升权限或认证？"
+
+description: |
+  检测以下RCE模式：
+
+  1. 命令注入 (CWE-78):
+     - Runtime.getRuntime().exec(userCmd)
+     - new ProcessBuilder(userCmd).start()
+
+  2. 脚本注入 (CWE-94):
+     - ScriptEngine.eval(userScript) - Nashorn JavaScript
+     - GroovyShell.evaluate(userCode) - Groovy
+
+  3. 表达式注入:
+     - QLExpress.execute(userExpr)
+     - OGNL.getValue(userExpr)
+     - SpEL injection
+
+  4. 不安全反序列化导致RCE:
+     - new Yaml().load(userYaml) - SnakeYAML gadget
+     - 需要使用SafeConstructor

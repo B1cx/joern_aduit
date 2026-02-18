@@ -1,0 +1,38 @@
+id: PHP-SQLI-001
+name: SQL Injection via String Interpolation
+language: php
+severity: high
+cwe: CWE-89
+category: injection
+
+query: |
+  cpg.call(".*(?:mysql_query|mysqli_query|pg_query|query|exec|prepare).*")
+    .where(_.argument.isCallTo(".*(?:sprintf|concat|\\.).*"))
+    .l
+
+sources:
+  - pattern: "cpg.call('.*\\$_GET.*')"
+    description: "$_GET superglobal"
+  - pattern: "cpg.call('.*\\$_POST.*')"
+    description: "$_POST superglobal"
+  - pattern: "cpg.call('.*\\$_REQUEST.*')"
+    description: "$_REQUEST superglobal"
+
+sinks:
+  - pattern: "cpg.call('.*mysql_query.*')"
+    description: "mysql_query()"
+  - pattern: "cpg.call('.*mysqli_query.*')"
+    description: "mysqli_query()"
+  - pattern: "cpg.call('.*PDO.*query.*')"
+    description: "PDO::query()"
+
+sanitizers:
+  - pattern: "PDO prepared statements with bindParam/bindValue"
+  - pattern: "mysqli_real_escape_string()"
+  - pattern: "intval() / (int) type cast on numeric parameters"
+
+guided_questions:
+  - "Is user input from $_GET/$_POST/$_REQUEST directly interpolated into SQL?"
+  - "Are prepared statements (PDO::prepare + bindParam) used?"
+  - "Is there any escaping (mysqli_real_escape_string)? Can it be bypassed with charset tricks?"
+  - "Is the query inside a function that expects sanitized input but doesn't enforce it?"

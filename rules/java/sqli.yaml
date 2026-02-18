@@ -1,0 +1,39 @@
+id: JAVA-SQLI-001
+name: SQL Injection via String Concatenation
+language: java
+severity: high
+cwe: CWE-89
+category: injection
+
+# Improved query to detect SQL injection via string concatenation
+# Specifically target JDBC/database methods, NOT HTTP clients
+query: |
+  cpg.call(".*(?:executeQuery|executeUpdate|createStatement|prepareStatement).*")
+    .where(_.argument.isCall)
+    .where(_.argument.astParent.isCall.name("<operator>.addition"))
+    .l
+
+sources:
+  - pattern: "cpg.method.parameter"
+    description: "Method parameters (includes controller inputs)"
+  - pattern: "cpg.call(\".*(?:getParameter|getRequestBody|getHeader).*\")"
+    description: "HTTP request data extraction methods"
+
+sinks:
+  - pattern: "cpg.call(\".*(?:executeQuery|executeUpdate).*\")"
+    description: "JDBC SQL execution methods (Statement.executeQuery/executeUpdate)"
+  - pattern: "cpg.call(\".*(?:createStatement|prepareStatement).*\")"
+    description: "JDBC Statement creation (can be vulnerable if SQL is pre-concatenated)"
+
+sanitizers:
+  - pattern: "PreparedStatement with ? placeholder and setString/setInt binding"
+  - pattern: "MyBatis #{} parameterized binding"
+  - pattern: "Input validation / whitelist check"
+  - pattern: "SQL escape functions"
+
+guided_questions:
+  - "Is the user input parameterized before reaching the SQL execution point (PreparedStatement with ? / MyBatis #{})?"
+  - "If using PreparedStatement, was the SQL string already concatenated before calling prepareStatement()?"
+  - "Is there whitelist validation or input filtering? Can the filter logic be bypassed?"
+  - "Does this SQL operation require authentication? Is the auth chain reliable?"
+  - "What is the source of the concatenated variable? Are there other code paths writing to it?"
