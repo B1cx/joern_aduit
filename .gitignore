@@ -3,10 +3,7 @@ joern_audit
 joern_audit.exe
 bin/
 
-# ===== 配置文件（含 API Key）=====
-joern_audit.yaml
-
-# ===== 扫描运行时产物 =====
+#===== 扫描运行时产物 =====
 .joern_audit/
 workspace/
 scan_output_*.log

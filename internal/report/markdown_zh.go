@@ -79,10 +79,10 @@ func (g *ChineseMarkdownGenerator) Generate(ctx context.Context, data *ReportDat
 
 			b.WriteString(fmt.Sprintf("- **位置**: `%s:%d`\n", f.FilePath, f.LineNumber))
 			b.WriteString(fmt.Sprintf("- **规则**: %s\n", f.RuleID))
-			if f.InitialSeverity != f.FinalSeverity {
-				b.WriteString(fmt.Sprintf("- **严重性**: %s → %s (LLM调整)\n", f.InitialSeverity, f.FinalSeverity))
+			if !strings.EqualFold(f.InitialSeverity, f.FinalSeverity) {
+				b.WriteString(fmt.Sprintf("- **严重性**: %s → %s (LLM调整)\n", strings.ToUpper(f.InitialSeverity), strings.ToUpper(f.FinalSeverity)))
 			} else {
-				b.WriteString(fmt.Sprintf("- **严重性**: %s\n", f.FinalSeverity))
+				b.WriteString(fmt.Sprintf("- **严重性**: %s\n", strings.ToUpper(f.FinalSeverity)))
 			}
 			b.WriteString("\n")
 

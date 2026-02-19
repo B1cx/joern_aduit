@@ -1,6 +1,6 @@
 # joern_audit — 项目进度与 TodoList
 
-> 最后更新：2026-02-18
+> 最后更新：2026-02-19
 
 ---
 
@@ -27,9 +27,13 @@
 - [x] **JAVA-SQLI-001**：SQL 注入（JDBC，自顶向下）
 - [x] **JAVA-SQLI-002**：SQL 注入（MyBatis `${}`，自底向上）⚠️ **仅注解驱动，XML mapper 需独立扫描器**
 - [x] **JAVA-RCE-001**：远程代码执行（Runtime / ProcessBuilder / ScriptEngine / SnakeYAML）
-- [x] **JAVA-DESER-001**：不安全反序列化（ObjectInputStream / Fastjson / XStream）
+- [x] **JAVA-DESER-001**：不安全反序列化（ObjectInputStream / Fastjson / XStream）— 已优化 sink 精度，消除 parse/load 误报
 - [x] **JAVA-SSRF-001**：服务端请求伪造
 - [x] **JAVA-FILE-001**：文件操作漏洞（已存在，未充分验证）
+- [x] **JAVA-XXE-001**：XML 外部实体注入（独立规则）
+- [x] **JAVA-AUTH-001**：认证/授权绕过（硬编码凭据 / JWT）
+- [x] **JAVA-CRYPTO-001**：不安全加密（硬编码密钥 / 弱算法）
+- [x] **XML-SQLI-001**：MyBatis XML Mapper `${}` SQL 注入（独立 XML 扫描器）
 
 ### LLM 验证层（Layer 2 - 受控概率性）
 - [x] 多 Provider 抽象接口（Claude / OpenAI 兼容）
@@ -39,8 +43,9 @@
 - [x] **令牌桶限流**（Token Bucket，可配置 RPM）
 - [x] **指数退避重试**（最多 4 次，1s → 2s → 4s → 8s）
 - [x] **并行 Agent 控制**（parallel_agents 配置）
-- [x] JSON 响应清理（`sanitizeJSON` / `extractJSON`）
+- [x] JSON 响应清理（`sanitizeJSON` / `extractJSON` / `repairJSON`）
 - [x] UTF-8 安全截断（Unicode 字符边界）
+- [x] LLM 内嵌双引号自动修复（`repairJSON`：中文引号 `"漏洞"` 不再破坏 JSON）
 - [x] HTML 错误页检测
 - [x] 对话日志保存
 
@@ -81,22 +86,22 @@
 - [ ] 端到端攻击路径构建
 - [ ] 组合漏洞评级
 
-### 规则扩展：XML Mapper 扫描器（纳入现有扫描体系）
+### 规则扩展：XML Mapper 扫描器 ✅ 已完成
 
-**背景**：Joern 的 `javasrc2cpg` 只解析 `.java` 文件，无法读取 MyBatis XML Mapper。独立 XML 扫描器生成标准 `Candidate`，与 Joern 候选合并后统一进入 LLM 三角色验证流水线。
+~~**背景**：Joern 的 `javasrc2cpg` 只解析 `.java` 文件，无法读取 MyBatis XML Mapper。独立 XML 扫描器生成标准 `Candidate`，与 Joern 候选合并后统一进入 LLM 三角色验证流水线。~~
 
-- [ ] **XML Scanner 实现**（`internal/scanner/xml_scanner.go`）
-  - [ ] 递归扫描目标目录下所有 `*.xml` 文件
-  - [ ] 识别 MyBatis Mapper 文件（存在 `<mapper namespace="...">` 标签）
-  - [ ] 解析 `<select>/<insert>/<update>/<delete>` 标签，提取 SQL 内容
-  - [ ] 正则检测 `${xxx}` 不安全参数替换（区别于安全的 `#{xxx}`）
-  - [ ] 生成标准 `cpg.Candidate`，RuleID 使用 `XML-SQLI-001`
-  - [ ] 在 Orchestrator Phase 1 中与 Joern 候选合并
-  - [ ] 为 LLM 提供充分上下文：XML SQL 语句 + Mapper 接口名
+- [x] **XML Scanner 实现**（`internal/scanner/xml_scanner.go`）
+  - [x] 递归扫描目标目录下所有 `*.xml` 文件
+  - [x] 识别 MyBatis Mapper 文件（存在 `<mapper namespace="...">` 标签）
+  - [x] 解析 `<select>/<insert>/<update>/<delete>` 标签，提取 SQL 内容
+  - [x] 正则检测 `${xxx}` 不安全参数替换（区别于安全的 `#{xxx}`）
+  - [x] 生成标准 `cpg.Candidate`，RuleID 使用 `XML-SQLI-001`
+  - [x] 在 Orchestrator Phase 1 中与 Joern 候选合并
+  - [x] 为 LLM 提供充分上下文：XML SQL 语句 + Mapper 接口名
 
-**影响范围**：
-- ❌ **当前无法检测**：UserMapper.xml 中的 `findByUserNameVuln02` / `findByUserNameVuln03`
-- ✅ **实现后可检测**：所有 XML Mapper 中的 `${xxx}` SQL 注入
+**验证结果**：
+- ✅ java-sec-code：检出 `findByUserNameVuln02` + `findByUserNameVuln03`
+- ✅ RuoYi：检出 5 个 `${params.dataScope}` SQL 注入（3 个 EXPLOITABLE_WITH_CONDITION）
 
 ---
 
@@ -122,15 +127,15 @@
 
 ### 规则扩展
 - [ ] **PHP 规则集**（JAVA-SQLI → PHP-SQLI 等移植）
-- [ ] **Java 扩展规则**：
-  - [ ] JAVA-AUTH-001（认证绕过 / JWT）
-  - [ ] JAVA-XXE-001（独立 XXE 规则，与 DESER 解耦）
-  - [ ] JAVA-CRYPTO-001（硬编码密钥 / 弱算法）
+- [x] **Java 扩展规则**（部分完成）：
+  - [x] JAVA-XXE-001（独立 XXE 规则，与 DESER 解耦）
+  - [x] JAVA-AUTH-001（认证绕过 / JWT）
+  - [x] JAVA-CRYPTO-001（硬编码密钥 / 弱算法）
   - [ ] JAVA-IDOR-001（不安全直接对象引用）
-- [ ] **规则精确度**：JAVA-DESER-001 规则 ID 错误地覆盖了 XXE 漏洞（命名混乱，需拆分）
+- [x] **规则精确度**：XXE 已拆分为独立规则 JAVA-XXE-001，所有 sink 已添加 `.where()` class 约束
 
 ### 多轮递进审计
-- [ ] Round 2（深度追踪，针对盲区）
+- [x] Round 2（NEEDS_DEEPER 深度验证，提升上下文到 CallChain）
 - [ ] Round 3（跨模块关联，仅 deep 模式）
 - [ ] 三问终止法则（自动判断是否继续下一轮）
 
@@ -157,13 +162,13 @@
 
 | 问题 | 严重程度 | 状态 |
 |------|---------|------|
-| **Joern 无法读取 XML/配置文件** | **高** | **设计限制** |
-| 'ä' 等北欧字符仍导致 JSON 解析失败 | 低 | 待修复 |
-| 网络 EOF / 超时时失败候选不会重新入队 | 中 | 待修复 |
-| JAVA-DESER-001 规则错误覆盖了 XXE 漏洞 | 中 | 待修复 |
-| 覆盖率矩阵在报告中全部显示"未覆盖" | 低 | 待修复 |
+| **Joern 无法读取 XML/配置文件** | **高** | **已缓解**（XML Mapper 扫描器已实现） |
+| ~~'ä' 等字符导致 JSON 解析失败~~ | ~~低~~ | ✅ 已修复（`repairJSON`） |
+| ~~网络 EOF / 超时失败候选不会重新入队~~ | ~~中~~ | ✅ 已修复（失败候选重试机制） |
+| ~~JAVA-DESER-001 规则误报率高~~ | ~~中~~ | ✅ 已修复（收紧 sink） |
+| ~~覆盖率矩阵显示"未覆盖"~~ | ~~低~~ | ✅ 已移除 |
+| ~~严重性 high→HIGH 误显"LLM调整"~~ | ~~低~~ | ✅ 已修复 |
 | verify / status / report 命令为空实现 | 低 | 待开发 |
-| `scan_output_*.log` 临时文件未自动清理 | 低 | 待修复 |
 
 ### ⚠️ Joern 文件读取限制详情
 
@@ -211,9 +216,11 @@
 ```
 v0.1（当前）：Java 基础扫描 + Prosecutor-Defender-Judge 验证
    ✅ 核心流水线运行
-   ✅ 6条 Java 规则（仅注解驱动的 MyBatis）
+   ✅ 9条 Java 规则（含 XXE / AUTH / CRYPTO）+ XML Mapper 扫描器
    ✅ 3种报告格式
-   ⚠️ 限制：无法扫描 XML mapper / pom.xml / properties
+   ✅ 失败候选重试机制（网络错误/JSON解析不再丢弃候选）
+   ✅ NEEDS_DEEPER 多轮递进验证（Phase 2.5）
+   ⚠️ 限制：无法扫描 pom.xml / properties
 
 v0.2（下一步）：稳定性 + 工程化
    → 修复已知 Bug（Unicode / EOF / 规则命名）
@@ -222,11 +229,9 @@ v0.2（下一步）：稳定性 + 工程化
    → 单元测试
 
 v0.3：配置文件扫描 + 规则扩展
-   → MyBatis XML Mapper 扫描器（高优先级）
-   → pom.xml 依赖 CVE 检测
+   → pom.xml 依赖 CVE 检测（SCA 模块）
    → application.properties/yml 配置安全检查
    → PHP 规则集移植
-   → Java 扩展规则（XXE / AUTH / CRYPTO）
    → 覆盖率矩阵实际更新
 
 v0.4：Fuzz 验证层（Phase 3）

@@ -1,0 +1,71 @@
+id: JAVA-XXE-001
+name: XML External Entity (XXE) Injection
+language: java
+severity: high
+cwe: CWE-611
+category: xxe
+
+query: |
+  cpg.call(".*(?:parse|unmarshal|newSAXParser|newDocumentBuilder|createXMLReader|newTransformer).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.annotation('.*Mapping.*').method.parameter"
+    description: "Spring Controller parameters"
+  - pattern: "cpg.call('.*getInputStream.*')"
+    description: "HttpServletRequest.getInputStream()"
+  - pattern: "cpg.call('.*getRequestBody.*')"
+    description: "HTTP request body"
+
+sinks:
+  - pattern: "cpg.call('.*parse.*').where(_.code('.*DocumentBuilder.*'))"
+    description: "DocumentBuilder.parse() - DOM XML parsing"
+  - pattern: "cpg.call('.*parse.*').where(_.code('.*SAXParser.*'))"
+    description: "SAXParser.parse() - SAX XML parsing"
+  - pattern: "cpg.call('.*parse.*').where(_.code('.*XMLReader.*'))"
+    description: "XMLReader.parse() - XMLReader parsing"
+  - pattern: "cpg.call('.*createXMLStreamReader.*').where(_.code('.*XMLInputFactory.*'))"
+    description: "XMLInputFactory.createXMLStreamReader() - StAX parsing"
+  - pattern: "cpg.call('.*newTransformer.*').where(_.code('.*TransformerFactory.*'))"
+    description: "TransformerFactory.newTransformer() - XSLT processing"
+  - pattern: "cpg.call('.*unmarshal.*').where(_.code('.*Unmarshaller.*'))"
+    description: "JAXB Unmarshaller.unmarshal()"
+
+sanitizers:
+  - pattern: "setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true)"
+    description: "Disable DOCTYPE declaration"
+  - pattern: "setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)"
+    description: "Enable secure processing"
+  - pattern: "setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, \"\")"
+    description: "Disable external DTD access"
+
+guided_questions:
+  - "XML 解析器是否禁用了外部实体和 DTD？"
+  - "使用的是哪个 XML 库？是否有安全默认配置？"
+  - "解析的 XML 数据来源是用户输入还是内部系统？"
+  - "是否设置了 FEATURE_SECURE_PROCESSING？"
+  - "是否同时禁用了 ACCESS_EXTERNAL_DTD 和 ACCESS_EXTERNAL_SCHEMA？"
+
+description: |
+  检测 XML 外部实体注入 (XXE) 漏洞：
+
+  1. DocumentBuilder XXE:
+     - DocumentBuilderFactory.newDocumentBuilder().parse(userXML)
+     - 未设置 disallow-doctype-decl 特性
+
+  2. SAXParser XXE:
+     - SAXParserFactory.newSAXParser().parse(userXML)
+     - 未禁用外部实体
+
+  3. XMLInputFactory XXE:
+     - XMLInputFactory.createXMLStreamReader(userXML)
+     - 未设置 IS_SUPPORTING_EXTERNAL_ENTITIES = false
+
+  4. Transformer XXE:
+     - TransformerFactory.newTransformer(userXSLT)
+     - 未限制外部访问
+
+  5. JAXB Unmarshaller XXE:
+     - Unmarshaller.unmarshal(userXML)
+     - 使用不安全的 Source

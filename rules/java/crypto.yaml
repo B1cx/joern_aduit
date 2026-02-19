@@ -1,0 +1,65 @@
+id: JAVA-CRYPTO-001
+name: Insecure Cryptography (Hardcoded Keys / Weak Algorithms)
+language: java
+severity: medium
+cwe: CWE-327
+category: crypto
+
+query: |
+  cpg.call(".*(?:getInstance|SecretKeySpec|PBEKeySpec|init).*")
+    .where(_.code(".*(?:DES|MD5|SHA-1|RC4|ECB|AES/ECB).*"))
+    .l
+
+sources:
+  - pattern: "cpg.literal"
+    description: "Hardcoded strings used as cryptographic keys"
+  - pattern: "cpg.call('.*getProperty.*')"
+    description: "Keys from configuration files"
+
+sinks:
+  - pattern: "cpg.call('.*getInstance.*').where(_.argument.code('.*(?:DES|DESede|RC[24]|Blowfish).*'))"
+    description: "Cipher.getInstance() with broken symmetric algorithms"
+  - pattern: "cpg.call('.*getInstance.*').where(_.argument.code('.*AES/ECB.*'))"
+    description: "Cipher.getInstance(\"AES/ECB\") - deterministic encryption"
+  - pattern: "cpg.call('.*getInstance.*').where(_.argument.code('.*(?:MD5|SHA-1).*'))"
+    description: "MessageDigest.getInstance() with broken hash algorithms"
+  - pattern: "cpg.call('.*SecretKeySpec.*').where(_.argument.isLiteral)"
+    description: "new SecretKeySpec(hardcodedBytes, ...) - hardcoded key"
+  - pattern: "cpg.call('.*new Random\\(.*').filterNot(_.code('.*SecureRandom.*'))"
+    description: "java.util.Random (predictable) instead of SecureRandom"
+
+sanitizers:
+  - pattern: "AES/GCM/NoPadding"
+    description: "AES-256-GCM authenticated encryption"
+  - pattern: "SHA-256 / SHA-3"
+    description: "Strong hash algorithms"
+  - pattern: "KeyStore.getInstance()"
+    description: "Keys retrieved from KeyStore / HSM / environment variables"
+
+guided_questions:
+  - "加密算法是否使用已被破解的算法（DES/MD5/SHA-1/RC4）？"
+  - "密钥是否硬编码在源代码中？"
+  - "对称加密是否使用 ECB 模式？"
+  - "是否使用 java.util.Random 生成安全相关的随机数？"
+  - "密钥长度是否足够（AES >= 128 位，RSA >= 2048 位）？"
+  - "是否使用了已弃用的加密 API？"
+
+description: |
+  检测不安全的加密实践：
+
+  1. 弱加密算法:
+     - Cipher.getInstance("DES") - DES 已被破解
+     - Cipher.getInstance("AES/ECB/PKCS5Padding") - ECB 模式不安全
+     - Cipher.getInstance("RC4") - RC4 已被破解
+
+  2. 弱哈希算法:
+     - MessageDigest.getInstance("MD5") - 碰撞攻击
+     - MessageDigest.getInstance("SHA-1") - 碰撞攻击
+
+  3. 硬编码密钥:
+     - new SecretKeySpec("hardcoded".getBytes(), "AES")
+     - 源代码中的密钥字符串
+
+  4. 不安全随机数:
+     - new Random() 用于生成令牌/密钥（应使用 SecureRandom）
+     - Math.random() 用于安全用途

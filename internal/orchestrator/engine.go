@@ -167,7 +167,6 @@ func (e *Engine) Run(ctx context.Context, target string) error {
 	}
 	fmt.Printf("  ✓ 合计 %d 个候选漏洞\n\n", len(candidates))
 
-	// Declare all LLM-related variables before potential goto statements
 	// Phase 2: LLM Verification
 	if len(candidates) > 0 && e.cfg.Scan.Mode != "joern-only" {
 		session.Phase = PhaseLLMVerify
@@ -195,10 +194,19 @@ func (e *Engine) Run(ctx context.Context, target string) error {
 			maxConcurrent = 1 // Default to sequential
 		}
 
+		// failedCandidate tracks a candidate that failed LLM verification due to errors
+		type failedCandidate struct {
+			index     int
+			candidate cpg.Candidate
+			err       error
+		}
+
 		// Use semaphore pattern for concurrency control
 		sem := make(chan struct{}, maxConcurrent)
 		var wg sync.WaitGroup
-		var mu sync.Mutex // Protect shared resources (store, output)
+		var mu sync.Mutex // Protect shared resources (store, output, failedCandidates)
+		var failedCandidates []failedCandidate
+		verifiedCount := 0
 
 	for i, c := range candidates {
 		wg.Add(1)
@@ -221,7 +229,12 @@ func (e *Engine) Run(ctx context.Context, target string) error {
 			judgeResult, err := tribunal.Verify(ctx, &candidate)
 			if err != nil {
 				mu.Lock()
-				fmt.Printf("  ❌ 验证失败: %v\n", err)
+				fmt.Printf("  ❌ 验证失败（将重试）: %v\n", err)
+				failedCandidates = append(failedCandidates, failedCandidate{
+					index:     index,
+					candidate: candidate,
+					err:       err,
+				})
 				mu.Unlock()
 				return
 			}
@@ -247,6 +260,7 @@ func (e *Engine) Run(ctx context.Context, target string) error {
 			if err := store.Save(rec); err != nil {
 				fmt.Printf("  ⚠️  保存证据失败: %v\n", err)
 			}
+			verifiedCount++
 			mu.Unlock()
 
 			// Print verdict (thread-safe)
@@ -261,28 +275,6 @@ func (e *Engine) Run(ctx context.Context, target string) error {
 			mu.Lock()
 			fmt.Printf("  %s 裁决: %s (置信度: %.2f, 严重性: %s)\n",
 				emoji, judgeResult.Verdict, judgeResult.Confidence, judgeResult.Severity)
-
-			// Update coverage matrix (commented out - coverage tracking not yet implemented in Engine)
-			// category := extractCategory(candidate.RuleID)
-			// dimMapping := map[string]DimensionID{
-			// 	"SQLI":     DimInjection,
-			// 	"CMDI":     DimInjection,
-			// 	"RCE":      DimInjection,
-			// 	"DESER":    DimDeserialization,
-			// 	"SSRF":     DimSSRF,
-			// 	"LFI":      DimFileOps,
-			// 	"UPLOAD":   DimFileOps,
-			// 	"XSS":      DimInjection,
-			// 	"XXE":      DimInjection,
-			// 	"AUTH":     DimAuth,
-			// 	"IDOR":     DimAuthz,
-			// 	"CRYPTO":   DimCrypto,
-			// }
-			// if dim, ok := dimMapping[category]; ok {
-			// 	if e.coverage != nil {
-			// 		e.coverage.Update(dim, Covered)
-			// 	}
-			// }
 			mu.Unlock()
 		}(i, c)
 	}
@@ -290,7 +282,136 @@ func (e *Engine) Run(ctx context.Context, target string) error {
 		// Wait for all goroutines to complete
 		wg.Wait()
 
-		fmt.Printf("\n  ✓ LLM 验证完成\n\n")
+		// Phase 2 Retry: retry failed candidates (serial, max 1 retry)
+		retrySuccessCount := 0
+		unverifiedCount := 0
+		if len(failedCandidates) > 0 {
+			fmt.Printf("\n  🔄 重试 %d 个失败候选（串行执行）\n", len(failedCandidates))
+
+			for _, fc := range failedCandidates {
+				candidateID := fmt.Sprintf("%s_%d", fc.candidate.RuleID, fc.candidate.LineNumber)
+				fmt.Printf("\n  [重试] %s (%s:%d) 原始错误: %v\n",
+					candidateID, fc.candidate.FilePath, fc.candidate.LineNumber, fc.err)
+
+				retryCandidate := fc.candidate
+				judgeResult, err := tribunal.Verify(ctx, &retryCandidate)
+				if err != nil {
+					// Still failed — save as UNVERIFIED
+					fmt.Printf("  ❌ 重试仍失败: %v → 保存为 UNVERIFIED\n", err)
+					rec := &evidence.Record{
+						CandidateID:     candidateID,
+						RuleID:          fc.candidate.RuleID,
+						FilePath:        fc.candidate.FilePath,
+						LineNumber:      fc.candidate.LineNumber,
+						InitialSeverity: fc.candidate.Severity,
+						FinalSeverity:   fc.candidate.Severity,
+						CWE:             extractCWE(fc.candidate.RuleID),
+						CPGEvidence:     fc.candidate.CPGEvidence,
+						LLMVerify: &evidence.LLMVerification{
+							Judge: &verifier.JudgeResult{
+								Verdict:    verifier.Verdict("UNVERIFIED"),
+								Severity:   fc.candidate.Severity,
+								Confidence: 0,
+								Reasoning:  fmt.Sprintf("LLM verification failed after retry: %v", err),
+							},
+							TotalTokens: 0,
+						},
+					}
+					if saveErr := store.Save(rec); saveErr != nil {
+						fmt.Printf("  ⚠️  保存证据失败: %v\n", saveErr)
+					}
+					unverifiedCount++
+					continue
+				}
+
+				// Retry succeeded
+				fmt.Printf("  ✅ 重试成功: %s (置信度: %.2f)\n", judgeResult.Verdict, judgeResult.Confidence)
+				rec := &evidence.Record{
+					CandidateID:     candidateID,
+					RuleID:          fc.candidate.RuleID,
+					FilePath:        fc.candidate.FilePath,
+					LineNumber:      fc.candidate.LineNumber,
+					InitialSeverity: fc.candidate.Severity,
+					FinalSeverity:   judgeResult.Severity,
+					CWE:             judgeResult.CWE,
+					CPGEvidence:     fc.candidate.CPGEvidence,
+					LLMVerify: &evidence.LLMVerification{
+						Judge:       judgeResult,
+						TotalTokens: 0,
+					},
+				}
+				if saveErr := store.Save(rec); saveErr != nil {
+					fmt.Printf("  ⚠️  保存证据失败: %v\n", saveErr)
+				}
+				retrySuccessCount++
+			}
+		}
+
+		fmt.Printf("\n  ✓ LLM 验证完成: 成功 %d / 重试成功 %d / 未验证 %d\n\n",
+			verifiedCount, retrySuccessCount, unverifiedCount)
+
+		// Phase 2.5: NEEDS_DEEPER deep verification
+		records, listErr := store.List(session.ID)
+		if listErr == nil {
+			var needsDeeperRecords []*evidence.Record
+			var needsDeeperCandidates []cpg.Candidate
+			for _, rec := range records {
+				if rec.LLMVerify != nil && rec.LLMVerify.Judge != nil &&
+					rec.LLMVerify.Judge.Verdict == verifier.VerdictNeedsDeeper {
+					needsDeeperRecords = append(needsDeeperRecords, rec)
+					// Reconstruct candidate from record
+					needsDeeperCandidates = append(needsDeeperCandidates, cpg.Candidate{
+						RuleID:      rec.RuleID,
+						FilePath:    rec.FilePath,
+						LineNumber:  rec.LineNumber,
+						Severity:    rec.InitialSeverity,
+						CPGEvidence: rec.CPGEvidence,
+					})
+				}
+			}
+
+			if len(needsDeeperRecords) > 0 {
+				fmt.Printf("🔬 [Phase 2.5] NEEDS_DEEPER 深度验证（%d 个候选）\n", len(needsDeeperRecords))
+
+				for i, deepCandidate := range needsDeeperCandidates {
+					candidateID := needsDeeperRecords[i].CandidateID
+					fmt.Printf("\n  [深度 %d/%d] %s (%s:%d) — 提升上下文到 CallChain\n",
+						i+1, len(needsDeeperCandidates), candidateID,
+						deepCandidate.FilePath, deepCandidate.LineNumber)
+
+					// Re-verify with expanded context level (CallChain)
+					judgeResult, err := tribunal.VerifyDeep(ctx, &deepCandidate, cpg.ContextLevelCallChain)
+					if err != nil {
+						fmt.Printf("  ❌ 深度验证失败: %v（保留原始 NEEDS_DEEPER 裁决）\n", err)
+						continue
+					}
+
+					// Update the record in store
+					updatedRec := needsDeeperRecords[i]
+					updatedRec.FinalSeverity = judgeResult.Severity
+					updatedRec.CWE = judgeResult.CWE
+					updatedRec.LLMVerify = &evidence.LLMVerification{
+						Judge:         judgeResult,
+						ContextRounds: 2, // Round 1 was initial, Round 2 is deep
+						TotalTokens:   0,
+					}
+					if saveErr := store.Save(updatedRec); saveErr != nil {
+						fmt.Printf("  ⚠️  更新证据失败: %v\n", saveErr)
+					}
+
+					verdictEmoji := map[string]string{
+						"TRUE_POSITIVE":              "✅",
+						"FALSE_POSITIVE":             "❌",
+						"NEEDS_DEEPER":               "🔬",
+						"EXPLOITABLE_WITH_CONDITION": "",
+					}
+					emoji := verdictEmoji[string(judgeResult.Verdict)]
+					fmt.Printf("  %s 深度裁决: %s (置信度: %.2f, 严重性: %s)\n",
+						emoji, judgeResult.Verdict, judgeResult.Confidence, judgeResult.Severity)
+				}
+				fmt.Printf("\n  ✓ NEEDS_DEEPER 深度验证完成\n\n")
+			}
+		}
 	} else {
 		// Handle joern-only mode or no candidates
 		if len(candidates) == 0 {

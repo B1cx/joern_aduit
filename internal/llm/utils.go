@@ -104,18 +104,23 @@ func sanitizeJSON(s string) string {
 	// 0. First extract the actual JSON object, removing any text before/after
 	s = extractJSON(s)
 
-	// 1. Replace Unicode replacement character (U+FFFD: �) which often indicates encoding issues
-	s = strings.ReplaceAll(s, "\uFFFD", "")
-	s = strings.ReplaceAll(s, "�", "")
+	// 1. Repair unescaped double quotes inside JSON string values.
+	//    LLM often uses ASCII " for Chinese quotation in text like:
+	//      "attack_path": "这是一个"漏洞"的分析"
+	//    The inner quotes break JSON parsing.
+	s = repairJSON(s)
 
-	// 2. Remove other problematic Unicode characters that might appear in LLM responses
-	// Remove zero-width characters
+	// 2. Replace Unicode replacement character (U+FFFD: <20>) which often indicates encoding issues
+	s = strings.ReplaceAll(s, "\uFFFD", "")
+	s = strings.ReplaceAll(s, "<28>", "")
+
+	// 3. Remove zero-width characters
 	s = strings.ReplaceAll(s, "\u200B", "") // Zero-width space
 	s = strings.ReplaceAll(s, "\u200C", "") // Zero-width non-joiner
 	s = strings.ReplaceAll(s, "\u200D", "") // Zero-width joiner
 	s = strings.ReplaceAll(s, "\uFEFF", "") // Zero-width no-break space (BOM)
 
-	// 3. Replace control characters (except newline, tab, carriage return which are valid in JSON)
+	// 4. Replace control characters (except newline, tab, carriage return which are valid in JSON)
 	var cleaned strings.Builder
 	for i, w := 0, 0; i < len(s); i += w {
 		r, width := utf8.DecodeRuneInString(s[i:])
@@ -129,15 +134,94 @@ func sanitizeJSON(s string) string {
 	}
 	s = cleaned.String()
 
-	// 4. Fix common encoding issues in Chinese text that might break JSON
-	// Replace any remaining invalid UTF-8 sequences
+	// 5. Fix remaining invalid UTF-8 sequences
 	if !utf8.ValidString(s) {
 		s = strings.ToValidUTF8(s, "")
 	}
 
-	// 5. Clean up multiple consecutive spaces (but preserve single spaces)
+	// 6. Clean up multiple consecutive spaces (but preserve single spaces)
 	re := regexp.MustCompile(` {2,}`)
 	s = re.ReplaceAllString(s, " ")
 
 	return s
+}
+
+// repairJSON fixes unescaped double quotes inside JSON string values.
+//
+// Problem: LLM outputs like  {"reasoning": "这是一个"漏洞"的分析"}
+// The inner " around 漏洞 breaks JSON parsing because the parser
+// thinks the string ended at 个".
+//
+// Solution: walk through the JSON byte-by-byte, tracking whether we're
+// inside a string. When we hit a " inside a string, look ahead to see
+// if what follows is JSON structure (,  }  ]  :) — if so it's a real
+// closing quote; otherwise it's an embedded quote that needs escaping.
+//
+// This is safe for UTF-8: the byte 0x22 (") never appears as a
+// continuation byte in multi-byte UTF-8 sequences.
+func repairJSON(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 64)
+
+	inString := false
+	i := 0
+
+	for i < len(s) {
+		ch := s[i]
+
+		// Inside a string: handle escape sequences verbatim
+		if inString && ch == '\\' {
+			b.WriteByte(ch)
+			i++
+			if i < len(s) {
+				b.WriteByte(s[i])
+				i++
+			}
+			continue
+		}
+
+		if ch == '"' {
+			if !inString {
+				// Opening a new string
+				inString = true
+				b.WriteByte(ch)
+				i++
+				continue
+			}
+
+			// Inside a string and hit a quote.
+			// Decide: is this the real closing quote, or an embedded one?
+			// Look at the first non-whitespace character after this quote.
+			j := i + 1
+			for j < len(s) && (s[j] == ' ' || s[j] == '\t' || s[j] == '\r' || s[j] == '\n') {
+				j++
+			}
+
+			isClosing := false
+			if j >= len(s) {
+				isClosing = true // end of input → must be closing
+			} else {
+				next := s[j]
+				// After a closing quote we expect JSON structure: , } ] :
+				if next == ',' || next == '}' || next == ']' || next == ':' {
+					isClosing = true
+				}
+			}
+
+			if isClosing {
+				inString = false
+				b.WriteByte(ch)
+			} else {
+				// Embedded quote → escape it
+				b.WriteString("\\\"")
+			}
+			i++
+			continue
+		}
+
+		b.WriteByte(ch)
+		i++
+	}
+
+	return b.String()
 }

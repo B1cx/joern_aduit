@@ -169,9 +169,60 @@ func (t *Tribunal) Verify(ctx context.Context, candidate *cpg.Candidate) (*Judge
 		return nil, fmt.Errorf("judge failed: %w", err)
 	}
 
-	// Phase 4: Context expansion if needed (future enhancement)
-	// If either side requested more context (need_more), we could expand here
-	// For MVP, we skip this and return the initial verdict
+	return judgeResult, nil
+}
+
+// VerifyDeep runs the Prosecutor-Defender-Judge cycle with an expanded context level.
+// Used for NEEDS_DEEPER candidates that require more context to make a definitive judgment.
+func (t *Tribunal) VerifyDeep(ctx context.Context, candidate *cpg.Candidate, level cpg.ContextLevel) (*JudgeResult, error) {
+	// Extract context at the specified deeper level
+	codeCtx, err := t.contextMgr.Extract(ctx, cpg.ContextRequest{
+		Candidate: candidate,
+		Level:     level,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("extract deep context (level %d): %w", level, err)
+	}
+
+	// Execute Prosecutor and Defender with expanded context
+	var (
+		prosResult *ProsecutorResult
+		defResult  *DefenderResult
+		prosErr    error
+		defErr     error
+	)
+
+	if t.parallelAgents {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			prosResult, prosErr = t.runProsecutor(ctx, candidate, codeCtx)
+		}()
+		go func() {
+			defer wg.Done()
+			defResult, defErr = t.runDefender(ctx, candidate, codeCtx)
+		}()
+		wg.Wait()
+	} else {
+		prosResult, prosErr = t.runProsecutor(ctx, candidate, codeCtx)
+		if prosErr == nil {
+			defResult, defErr = t.runDefender(ctx, candidate, codeCtx)
+		}
+	}
+
+	if prosErr != nil {
+		return nil, fmt.Errorf("prosecutor failed (deep): %w", prosErr)
+	}
+	if defErr != nil {
+		return nil, fmt.Errorf("defender failed (deep): %w", defErr)
+	}
+
+	// Judge evaluates with expanded context
+	judgeResult, err := t.runJudge(ctx, candidate, codeCtx, prosResult, defResult)
+	if err != nil {
+		return nil, fmt.Errorf("judge failed (deep): %w", err)
+	}
 
 	return judgeResult, nil
 }

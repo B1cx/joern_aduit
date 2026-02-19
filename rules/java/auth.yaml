@@ -1,0 +1,65 @@
+id: JAVA-AUTH-001
+name: Authentication/Authorization Bypass
+language: java
+severity: high
+cwe: CWE-287
+category: auth
+
+query: |
+  cpg.call(".*(?:authenticate|login|verify|checkPassword|validateToken|decode|verify).*")
+    .l
+
+sources:
+  - pattern: "cpg.call('.*getParameter.*')"
+    description: "HTTP request parameters"
+  - pattern: "cpg.call('.*getHeader.*')"
+    description: "HTTP headers (Cookie, Authorization)"
+  - pattern: "cpg.call('.*getCookies.*')"
+    description: "Cookie values"
+
+sinks:
+  - pattern: "cpg.call('.*equals.*').where(_.argument.isLiteral)"
+    description: "Hardcoded password comparison (password.equals(\"admin\"))"
+  - pattern: "cpg.call('.*decode.*').where(_.code('.*(?:JWT|Base64|Token).*'))"
+    description: "JWT/Token decode without signature verification"
+  - pattern: "cpg.call('.*setAttribute.*').where(_.code('.*[Ss]ession.*'))"
+    description: "Session.setAttribute without proper validation"
+  - pattern: "cpg.call('.*setAuthenticated.*')"
+    description: "Direct authentication state manipulation"
+
+sanitizers:
+  - pattern: "AuthenticationManager.authenticate()"
+    description: "Spring Security AuthenticationManager"
+  - pattern: "BCrypt.checkpw() / BCrypt.hashpw()"
+    description: "BCrypt password hashing"
+  - pattern: "JWT.require().verify()"
+    description: "JWT signature verification"
+
+guided_questions:
+  - "认证流程是否可被绕过（空密码/默认凭据/条件跳过）？"
+  - "JWT Token 是否验证签名？使用的算法是否安全（非 none）？"
+  - "Session 管理是否有固定会话漏洞？"
+  - "是否有权限提升路径（普通用户 -> 管理员）？"
+  - "密码比较是否使用了时间安全的比较方法？"
+  - "是否存在硬编码的后门账户或密码？"
+
+description: |
+  检测认证/授权绕过漏洞：
+
+  1. 硬编码凭据:
+     - if (password.equals("admin")) - 硬编码密码比较
+     - 默认账户/后门账户
+
+  2. JWT 安全问题:
+     - JWT.decode() 不验证签名
+     - Algorithm.none() 算法攻击
+     - 弱密钥 / 硬编码 JWT Secret
+
+  3. 会话安全:
+     - Session fixation（登录后未更换 Session ID）
+     - 缺少 Session 超时设置
+
+  4. 权限绕过:
+     - 可被跳过的认证检查（条件分支绕过）
+     - 缺少方法级权限注解
+     - IDOR (Insecure Direct Object Reference)

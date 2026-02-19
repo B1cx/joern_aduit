@@ -84,9 +84,9 @@ func (cm *ContextManager) Extract(ctx context.Context, req ContextRequest) (*Con
 func (cm *ContextManager) extractAlertLine(ctx context.Context, req ContextRequest) (*ContextResult, error) {
 	// Read alert line ± 5 lines
 	const contextLines = 5
-	filePath := filepath.Join(cm.sourceDir, req.Candidate.FilePath)
+	absPath := cm.resolvePath(req.Candidate.FilePath)
 
-	code, err := cm.readLines(filePath, req.Candidate.LineNumber-contextLines, req.Candidate.LineNumber+contextLines)
+	code, err := cm.readLines(absPath, req.Candidate.LineNumber-contextLines, req.Candidate.LineNumber+contextLines)
 	if err != nil {
 		return nil, fmt.Errorf("read alert line: %w", err)
 	}
@@ -118,7 +118,7 @@ func (cm *ContextManager) extractFunctionBody(ctx context.Context, req ContextRe
 	}
 
 	// Read function body from source
-	filePath := filepath.Join(cm.sourceDir, fn.FilePath)
+	filePath := cm.resolvePath(fn.FilePath)
 	code, err := cm.readLines(filePath, fn.StartLine, fn.EndLine)
 	if err != nil {
 		return nil, fmt.Errorf("read function body: %w", err)
@@ -164,7 +164,7 @@ func (cm *ContextManager) extractCallChain(ctx context.Context, req ContextReque
 				continue
 			}
 
-			filePath := filepath.Join(cm.sourceDir, caller.FilePath)
+			filePath := cm.resolvePath(caller.FilePath)
 			code, err := cm.readLines(filePath, caller.StartLine, caller.EndLine)
 			if err != nil {
 				continue
@@ -194,7 +194,7 @@ func (cm *ContextManager) extractCallChain(ctx context.Context, req ContextReque
 				continue
 			}
 
-			filePath := filepath.Join(cm.sourceDir, callee.FilePath)
+			filePath := cm.resolvePath(callee.FilePath)
 			code, err := cm.readLines(filePath, callee.StartLine, callee.EndLine)
 			if err != nil {
 				continue
@@ -230,7 +230,7 @@ func (cm *ContextManager) extractDataFlow(ctx context.Context, req ContextReques
 		// Extract code at each node in the taint path
 		for _, node := range flow.Nodes {
 			// Read ±3 lines around each taint node
-			filePath := filepath.Join(cm.sourceDir, node.File)
+			filePath := cm.resolvePath(node.File)
 			code, err := cm.readLines(filePath, node.Line-3, node.Line+3)
 			if err != nil {
 				continue
@@ -304,7 +304,7 @@ func (cm *ContextManager) extractGlobal(ctx context.Context, req ContextRequest)
 	}
 
 	for _, configFile := range configFiles {
-		configPath := filepath.Join(cm.sourceDir, configFile)
+		configPath := cm.resolvePath(configFile)
 		if _, err := os.Stat(configPath); err == nil {
 			// Config file exists, read it (limit to first 100 lines)
 			code, err := cm.readLines(configPath, 1, 100)
@@ -326,6 +326,16 @@ func (cm *ContextManager) extractGlobal(ctx context.Context, req ContextRequest)
 
 	result.Level = ContextLevelGlobal
 	return result, nil
+}
+
+// resolvePath returns the absolute file path for a candidate.
+// If the candidate's path is already absolute, use it directly;
+// otherwise join with sourceDir.
+func (cm *ContextManager) resolvePath(candidatePath string) string {
+	if filepath.IsAbs(candidatePath) {
+		return candidatePath
+	}
+	return filepath.Join(cm.sourceDir, candidatePath)
 }
 
 // readLines reads lines from startLine to endLine (inclusive) from a file.

@@ -92,7 +92,7 @@ func (s *MemoryIndexStore) GetFunctionByLocation(file string, line int) (*Functi
 	key := fmt.Sprintf("%s:%d", file, line)
 	fn, ok := s.locIndex[key]
 	if !ok {
-		return nil, fmt.Errorf("function not found at %s:%d", file, line)
+		return nil, nil // not found — let caller decide fallback
 	}
 	return fn, nil
 }

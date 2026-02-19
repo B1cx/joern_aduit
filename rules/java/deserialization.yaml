@@ -5,11 +5,12 @@ severity: critical
 cwe: CWE-502
 category: deserialization
 
-# Improved query to detect unsafe deserialization
-# Focus on method calls: readObject, parseObject, etc.
+# Query: only match actual deserialization method calls
+# Exclude: parseInt, parseDate, parseDateToStr, parseFloat, parseLong, parseBoolean,
+#           parse(userAgent), Properties.load(), Workbook.load(), etc.
 query: |
-  cpg.call(".*(?:readObject|readUnshared|parseObject|parse|fromXML|load).*")
-    .where(_.code(".*(?:ObjectInputStream|XMLDecoder|JSON|Fastjson|Yaml|XStream).*"))
+  cpg.call(".*(?:readObject|readUnshared).*")
+    .where(_.code(".*ObjectInputStream.*"))
     .l
 
 sources:
@@ -21,19 +22,30 @@ sources:
     description: "Cookie values (e.g., rememberMe)"
   - pattern: "cpg.call('.*getHeader.*')"
     description: "HTTP headers"
+  - pattern: "cpg.call('.*getParameter.*')"
+    description: "HTTP request parameters"
+  - pattern: "cpg.call('.*getRequestBody.*')"
+    description: "HTTP request body"
 
 sinks:
-  - pattern: "cpg.call('.*readObject.*')"
+  # 1. Java native deserialization — highest risk
+  - pattern: "cpg.call('.*readObject.*').where(_.code('.*ObjectInputStream.*'))"
     description: "ObjectInputStream.readObject() / readUnshared()"
-  - pattern: "cpg.call('.*XMLDecoder.*')"
+
+  # 2. XMLDecoder — high risk
+  - pattern: "cpg.call('.*readObject.*').where(_.code('.*XMLDecoder.*'))"
     description: "XMLDecoder.readObject()"
-  - pattern: "cpg.call('.*parseObject.*')"
-    description: "Fastjson JSON.parseObject() with autoType"
-  - pattern: "cpg.call('.*parse.*')"
-    description: "JSON parsing methods"
-  - pattern: "cpg.call('.*fromXML.*')"
+
+  # 3. Fastjson — only parseObject (not generic parse/parseDate/parseInt)
+  - pattern: "cpg.call('.*parseObject.*').where(_.code('.*JSON.*'))"
+    description: "Fastjson JSON.parseObject() with potential autoType"
+
+  # 4. XStream — fromXML
+  - pattern: "cpg.call('.*fromXML.*').where(_.code('.*XStream.*'))"
     description: "XStream.fromXML()"
-  - pattern: "cpg.call('.*load')"
+
+  # 5. SnakeYAML — Yaml().load, not Properties.load/ClassLoader.load
+  - pattern: "cpg.call('.*\\.load.*').where(_.code('.*Yaml.*'))"
     description: "Yaml.load() without SafeConstructor"
 
 sanitizers:
@@ -42,6 +54,7 @@ sanitizers:
   - pattern: "Look-ahead deserialization pattern"
   - pattern: "Fastjson with autoType disabled or safeMode"
   - pattern: "Yaml with SafeConstructor"
+  - pattern: "JSON parse of server-side HTTP response (not user input)"
 
 guided_questions:
   - "反序列化的数据来源是否不可信（网络请求、Cookie、用户上传）？"
@@ -51,6 +64,7 @@ guided_questions:
   - "对于Fastjson，是否启用了autoType？是否可以通过@type指定任意类？"
   - "对于SnakeYAML，是否使用了SafeConstructor？"
   - "是否有自定义的反序列化过滤器（如AntObjectInputStream）？"
+  - "JSONObject.parseObject() 解析的数据来源是用户输入还是内部API响应？"
 
 description: |
   检测不安全反序列化漏洞：
@@ -63,7 +77,7 @@ description: |
   2. Fastjson反序列化RCE：
      - JSON.parseObject(userJson) with autoType
      - @type指定恶意类触发RCE
-     - TemplatesImpl gadget等
+     - 注意：JSON.parseObject() 解析内部API响应不算漏洞
 
   3. SnakeYAML反序列化：
      - new Yaml().load(userYaml)
@@ -74,9 +88,8 @@ description: |
      - xstream.fromXML(userXml)
      - XML注入恶意类
 
-  安全实践：
-  - 避免反序列化不可信数据
-  - 使用ObjectInputFilter白名单
-  - Fastjson禁用autoType或使用safeMode
-  - Yaml使用SafeConstructor
-  - 更新到安全版本
+  不匹配以下安全的 parse/load 调用：
+  - Integer.parseInt(), Long.parseLong(), Float.parseFloat()
+  - SimpleDateFormat.parse(), DateUtils.parseDate()
+  - Properties.load(), ClassLoader.loadClass()
+  - UserAgent.parse(), Pattern.matcher()
