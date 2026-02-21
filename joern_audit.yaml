@@ -8,7 +8,7 @@ llm:
   base_url: https://code.newcli.com/claude/droid
 
   # 关键设置（避免 429 和防火墙策略）
-  parallel_agents: false  # 单个候选内串行（避免并发翻倍）
+  parallel_agents: true  # 单个候选内串行（避免并发翻倍）
   max_concurrent: 2       # 最多同时验证2个候选项（更保守，避免429）
   rate_limit_rpm: 30      # 30 RPM（保守）
   max_retries: 3          # 自动重试 3 次

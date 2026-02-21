@@ -64,6 +64,7 @@ type ScanConfig struct {
 	PromptsDir string   `yaml:"prompts_dir"`
 	MaxRounds  int      `yaml:"max_rounds"`
 	Excludes   []string `yaml:"excludes"`
+	DiffRef    string   `yaml:"diff_ref"`   // git ref for incremental scan (e.g. HEAD~1, main)
 }
 
 type DBConfig struct {
@@ -76,10 +77,16 @@ type ReportConfig struct {
 }
 
 type FuzzerConfig struct {
-	Enabled    bool   `yaml:"enabled"`
-	Sandbox    string `yaml:"sandbox"` // docker, none
-	Timeout    int    `yaml:"timeout"`
-	SqlmapPath string `yaml:"sqlmap_path"`
+	Enabled        bool              `yaml:"enabled"`
+	Sandbox        string            `yaml:"sandbox"` // docker, none
+	Timeout        int               `yaml:"timeout"` // per-tool timeout in seconds
+	TargetURL      string            `yaml:"target_url"`
+	Cookie         string            `yaml:"cookie"`          // auth cookie string for authenticated testing
+	Headers        map[string]string `yaml:"headers"`         // extra HTTP headers
+	SqlmapPath     string            `yaml:"sqlmap_path"`
+	YsoserialPath  string            `yaml:"ysoserial_path"`
+	MarshalsecPath string            `yaml:"marshalsec_path"`
+	CallbackAddr   string            `yaml:"callback_addr"`   // OOB callback address, empty = skip OOB checks
 }
 
 type LoggingConfig struct {
@@ -138,7 +145,7 @@ func DefaultConfig() *Config {
 		Fuzzer: FuzzerConfig{
 			Enabled: false,
 			Sandbox: "docker",
-			Timeout: 120,
+			Timeout: 300,
 		},
 		Logging: LoggingConfig{
 			Level:  "info",

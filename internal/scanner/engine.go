@@ -79,17 +79,19 @@ func (e *Engine) scanWithTaintFlow(ctx context.Context, rule *Rule) ([]cpg.Candi
 				// Create candidate at the sink location
 				sinkNode := flow.Nodes[len(flow.Nodes)-1]
 				c := cpg.Candidate{
-					RuleID:     rule.ID,
-					Severity:   rule.Severity,
-					FilePath:   sinkNode.File,
-					LineNumber: sinkNode.Line,
-					Message:    rule.Name,
+					RuleID:          rule.ID,
+					Severity:        rule.Severity,
+					FilePath:        sinkNode.File,
+					LineNumber:      sinkNode.Line,
+					Message:         rule.Name,
 					CPGEvidence: &cpg.CPGEvidence{
 						TaintFlow:  flow.Nodes,
 						JoernQuery: fmt.Sprintf("Flow: %s -> %s", source.Pattern, sink.Pattern),
 					},
-					Status:     cpg.StatusPending,
-					Confidence: 0.7, // Higher confidence for taint flow matches
+					Status:          cpg.StatusPending,
+					Confidence:      0.7, // Higher confidence for taint flow matches
+					GuidedQuestions: rule.GuidedQuestions,
+					Sanitizers:     extractSanitizerPatterns(rule),
 				}
 
 				candidates = append(candidates, c)
@@ -121,17 +123,19 @@ func (e *Engine) scanWithQuery(ctx context.Context, rule *Rule) ([]cpg.Candidate
 		}
 
 		c := cpg.Candidate{
-			RuleID:     rule.ID,
-			Severity:   rule.Severity,
-			FilePath:   filePath,
-			LineNumber: lineNumber,
-			Message:    rule.Name,
+			RuleID:          rule.ID,
+			Severity:        rule.Severity,
+			FilePath:        filePath,
+			LineNumber:      lineNumber,
+			Message:         rule.Name,
 			CPGEvidence: &cpg.CPGEvidence{
 				JoernQuery: rule.Query,
 				CallChain:  []string{methodName},
 			},
-			Status:     cpg.StatusPending,
-			Confidence: 0.5, // Lower confidence for pattern matches
+			Status:          cpg.StatusPending,
+			Confidence:      0.5, // Lower confidence for pattern matches
+			GuidedQuestions: rule.GuidedQuestions,
+			Sanitizers:     extractSanitizerPatterns(rule),
 		}
 
 		// Store the code snippet as additional context
@@ -148,4 +152,16 @@ func (e *Engine) scanWithQuery(ctx context.Context, rule *Rule) ([]cpg.Candidate
 // Rules returns all loaded rules.
 func (e *Engine) Rules() []*Rule {
 	return e.rules
+}
+
+// extractSanitizerPatterns extracts sanitizer pattern strings from a rule.
+func extractSanitizerPatterns(rule *Rule) []string {
+	if len(rule.Sanitizers) == 0 {
+		return nil
+	}
+	patterns := make([]string, len(rule.Sanitizers))
+	for i, s := range rule.Sanitizers {
+		patterns[i] = s.Pattern
+	}
+	return patterns
 }

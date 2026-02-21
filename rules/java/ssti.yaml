@@ -1,0 +1,73 @@
+id: JAVA-SSTI-001
+name: Server-Side Template Injection
+language: java
+severity: critical
+cwe: CWE-94
+category: injection
+
+# Detect user input reaching template engine evaluation
+query: |
+  cpg.call(".*(?:process|evaluate|merge|execute|render|getTemplate|fromString|newTemplateSelectionModel).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.annotation('.*Mapping.*').method.parameter"
+    description: "Spring Controller method parameters"
+  - pattern: "cpg.call('.*getParameter.*')"
+    description: "HttpServletRequest.getParameter()"
+  - pattern: "cpg.call('.*getRequestBody.*')"
+    description: "HTTP request body"
+
+sinks:
+  - pattern: "cpg.call('.*Velocity.*evaluate.*')"
+    description: "Velocity.evaluate() — Velocity template evaluation"
+  - pattern: "cpg.call('.*Template.*process.*')"
+    description: "Freemarker Template.process()"
+  - pattern: "cpg.call('.*fromString.*')"
+    description: "Thymeleaf SpringTemplateEngine fragment from user string"
+  - pattern: "cpg.call('.*TemplateEngine.*process.*')"
+    description: "Thymeleaf TemplateEngine.process()"
+  - pattern: "cpg.call('.*merge.*')"
+    description: "Velocity Template.merge()"
+  - pattern: "cpg.call('.*ExpressionParser.*parseExpression.*')"
+    description: "Spring Expression Language (SpEL) evaluation"
+  - pattern: "cpg.call('.*getValue.*')"
+    description: "OGNL/SpEL getValue() — expression evaluation"
+  - pattern: "cpg.call('.*setValue.*')"
+    description: "OGNL setValue() — expression evaluation"
+
+sanitizers:
+  - pattern: "Template name allowlist (only predefined template names)"
+  - pattern: "Sandbox mode for template engine (Freemarker Configuration)"
+  - pattern: "Input restricted to alphanumeric characters"
+  - pattern: "Spring SpEL SimpleEvaluationContext (not StandardEvaluationContext)"
+
+guided_questions:
+  - "用户输入是否直接作为模板内容或模板名被模板引擎解析？"
+  - "模板引擎是否配置了沙箱模式（如 Freemarker 的 TemplateClassResolver.ALLOWS_NOTHING）？"
+  - "SpEL 是否使用了 SimpleEvaluationContext 而非 StandardEvaluationContext？后者允许任意类访问。"
+  - "用户能控制的是模板名（较低风险）还是模板内容（高风险）？"
+  - "是否存在对模板语法特殊字符（${}、#{}、<#>、{{}}）的过滤？"
+
+description: |
+  检测服务端模板注入（SSTI）模式：
+
+  1. Freemarker SSTI:
+     - new Template("name", new StringReader(userInput), cfg)
+     - <#assign ex="freemarker.template.utility.Execute"?new()> ${ex("id")}
+
+  2. Velocity SSTI:
+     - Velocity.evaluate(context, writer, "tag", userInput)
+     - #set($e="") $e.getClass().forName("java.lang.Runtime")
+
+  3. Thymeleaf SSTI:
+     - 控制器返回用户可控的模板片段
+     - __${T(java.lang.Runtime).getRuntime().exec("id")}__
+
+  4. SpEL 注入:
+     - new SpelExpressionParser().parseExpression(userInput).getValue()
+     - T(java.lang.Runtime).getRuntime().exec("id")
+
+  5. OGNL 注入 (Struts2):
+     - OgnlUtil.getValue(userInput, context, root)

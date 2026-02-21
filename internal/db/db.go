@@ -127,9 +127,12 @@ CREATE INDEX IF NOT EXISTS idx_candidates_rule ON candidates(session_id, rule_id
 
 CREATE TABLE IF NOT EXISTS evidence_records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL REFERENCES sessions(id),
-    candidate_id INTEGER REFERENCES candidates(id),
-    discovery_json TEXT,
+    session_id TEXT NOT NULL DEFAULT '',
+    candidate_id TEXT NOT NULL,
+    rule_id TEXT NOT NULL DEFAULT '',
+    file_path TEXT NOT NULL DEFAULT '',
+    line_number INTEGER NOT NULL DEFAULT 0,
+    initial_severity TEXT NOT NULL DEFAULT '',
     cpg_evidence_json TEXT,
     llm_verification_json TEXT,
     fuzz_verification_json TEXT,
@@ -137,7 +140,8 @@ CREATE TABLE IF NOT EXISTS evidence_records (
     final_severity TEXT,
     cwe TEXT,
     cvss REAL DEFAULT 0.0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(session_id, candidate_id)
 );
 
 CREATE TABLE IF NOT EXISTS coverage (

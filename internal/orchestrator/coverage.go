@@ -1,5 +1,7 @@
 package orchestrator
 
+import "strings"
+
 // CoverageStatus represents the coverage state of a security dimension.
 type CoverageStatus string
 
@@ -61,6 +63,86 @@ func NewCoverageMatrix() *CoverageMatrix {
 		m.dims[d.id] = &Dimension{ID: d.id, Name: d.name, Status: Uncovered}
 	}
 	return m
+}
+
+// categoryToDimension maps rule category keywords to security dimensions.
+var categoryToDimension = map[string]DimensionID{
+	"SQLI":   DimInjection,
+	"CMDI":   DimInjection,
+	"RCE":    DimInjection,
+	"SSTI":   DimInjection,
+	"XSS":    DimInjection,
+	"XXE":    DimInjection,
+	"XPATH":  DimInjection,
+	"LDAP":   DimInjection,
+	"EL":     DimInjection,
+	"AUTH":   DimAuth,
+	"AUTHZ":  DimAuthz,
+	"IDOR":   DimAuthz,
+	"DESER":  DimDeserialization,
+	"LFI":    DimFileOps,
+	"FILE":   DimFileOps,
+	"UPLOAD": DimFileOps,
+	"SSRF":   DimSSRF,
+	"CRYPTO": DimCrypto,
+	"CONFIG": DimConfig,
+	"CORS":   DimConfig,
+	"DEBUG":  DimConfig,
+}
+
+// ResolveDimension maps a rule ID (e.g., "JAVA-SQLI-001") to a DimensionID.
+func ResolveDimension(ruleID string) DimensionID {
+	parts := strings.Split(ruleID, "-")
+	if len(parts) >= 2 {
+		category := strings.ToUpper(parts[1])
+		if dim, ok := categoryToDimension[category]; ok {
+			return dim
+		}
+	}
+	return ""
+}
+
+// MarkRuleScanned marks that a Joern rule targeting this dimension was executed.
+// Transitions: uncovered → shallow.
+func (m *CoverageMatrix) MarkRuleScanned(ruleID string) {
+	dim := ResolveDimension(ruleID)
+	if dim == "" {
+		return
+	}
+	d := m.dims[dim]
+	if d == nil {
+		return
+	}
+	d.JoernRules = true
+	if d.Status == Uncovered {
+		d.Status = Shallow
+	}
+}
+
+// AddFinding records a verified finding for a dimension and promotes to covered.
+func (m *CoverageMatrix) AddFinding(ruleID string) {
+	dim := ResolveDimension(ruleID)
+	if dim == "" {
+		return
+	}
+	d := m.dims[dim]
+	if d == nil {
+		return
+	}
+	d.FindingCount++
+	d.Status = Covered
+}
+
+// MarkLLMExplored marks that a dimension was explored by the LLM Explorer agent.
+func (m *CoverageMatrix) MarkLLMExplored(dim DimensionID) {
+	d := m.dims[dim]
+	if d == nil {
+		return
+	}
+	d.LLMExplored = true
+	if d.Status == Uncovered {
+		d.Status = Shallow
+	}
 }
 
 // Get returns the dimension by ID.

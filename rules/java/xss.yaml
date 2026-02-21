@@ -1,0 +1,59 @@
+id: JAVA-XSS-001
+name: Cross-Site Scripting via Unescaped Output
+language: java
+severity: medium
+cwe: CWE-79
+category: injection
+
+# Detect user input reaching response output without encoding
+query: |
+  cpg.call(".*(?:getWriter|getOutputStream|println|print|write|append|addAttribute|addObject|setAttribute).*")
+    .where(_.argument.reachableBy(cpg.method.parameter))
+    .l
+
+sources:
+  - pattern: "cpg.annotation('.*Mapping.*').method.parameter"
+    description: "Spring Controller method parameters"
+  - pattern: "cpg.call('.*getParameter.*')"
+    description: "HttpServletRequest.getParameter()"
+  - pattern: "cpg.call('.*getHeader.*')"
+    description: "HttpServletRequest.getHeader()"
+  - pattern: "cpg.call('.*getCookies.*')"
+    description: "HttpServletRequest.getCookies()"
+
+sinks:
+  - pattern: "cpg.call('.*getWriter.*\\.print.*')"
+    description: "HttpServletResponse.getWriter().print/println — direct response write"
+  - pattern: "cpg.call('.*addAttribute.*')"
+    description: "Spring Model.addAttribute() — template variable binding"
+  - pattern: "cpg.call('.*setAttribute.*')"
+    description: "HttpServletRequest.setAttribute() — JSP attribute"
+  - pattern: "cpg.call('.*append.*')"
+    description: "StringBuilder/StringBuffer.append() in response context"
+
+sanitizers:
+  - pattern: "HtmlUtils.htmlEscape() / StringEscapeUtils.escapeHtml4()"
+  - pattern: "OWASP Java Encoder (Encode.forHtml, Encode.forJavaScript)"
+  - pattern: "Thymeleaf th:text (auto-escapes by default, vs th:utext)"
+  - pattern: "Spring @ResponseBody with JSON serialization (not HTML)"
+  - pattern: "Content-Type: application/json response header"
+
+guided_questions:
+  - "用户输入在输出到 HTML 页面之前，是否经过了 HTML 实体编码（htmlEscape / OWASP Encoder）？"
+  - "该接口返回的 Content-Type 是 text/html 还是 application/json？JSON 响应通常不受 XSS 影响。"
+  - "如果使用模板引擎（Thymeleaf/Freemarker/JSP），是否使用了安全的输出语法（th:text 而非 th:utext）？"
+  - "是否存在全局 XSS Filter 或 WAF 防护？过滤逻辑是否可绕过？"
+  - "输出上下文是 HTML body、HTML attribute、JavaScript 还是 URL？不同上下文需要不同编码。"
+
+description: |
+  检测反射型/存储型 XSS 模式：
+
+  1. 反射型 XSS:
+     - request.getParameter() → response.getWriter().print()
+     - Controller 参数 → Model.addAttribute() → 模板未转义输出
+
+  2. 存储型 XSS:
+     - 用户输入 → 存库 → 读取后直接输出到 HTML
+
+  3. DOM XSS (有限检测):
+     - 服务端将用户输入嵌入 JavaScript 变量

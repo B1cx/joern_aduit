@@ -75,6 +75,13 @@ type JudgeResult struct {
 	CVSSBase      float64        `json:"cvss_base"`
 }
 
+// TribunalResult bundles the full three-role verification output.
+type TribunalResult struct {
+	Prosecutor *ProsecutorResult `json:"prosecutor,omitempty"`
+	Defender   *DefenderResult   `json:"defender,omitempty"`
+	Judge      *JudgeResult      `json:"judge"`
+}
+
 // Tribunal orchestrates the Prosecutor-Defender-Judge verification flow.
 type Tribunal struct {
 	provider       llm.Provider
@@ -170,6 +177,55 @@ func (t *Tribunal) Verify(ctx context.Context, candidate *cpg.Candidate) (*Judge
 	}
 
 	return judgeResult, nil
+}
+
+// VerifyFull runs the full Prosecutor-Defender-Judge cycle and returns all three results.
+func (t *Tribunal) VerifyFull(ctx context.Context, candidate *cpg.Candidate) (*TribunalResult, error) {
+	codeCtx, err := t.contextMgr.Extract(ctx, cpg.ContextRequest{
+		Candidate: candidate,
+		Level:     cpg.ContextLevelFunctionBody,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("extract context: %w", err)
+	}
+
+	var (
+		prosResult *ProsecutorResult
+		defResult  *DefenderResult
+		prosErr    error
+		defErr     error
+	)
+
+	if t.parallelAgents {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); prosResult, prosErr = t.runProsecutor(ctx, candidate, codeCtx) }()
+		go func() { defer wg.Done(); defResult, defErr = t.runDefender(ctx, candidate, codeCtx) }()
+		wg.Wait()
+	} else {
+		prosResult, prosErr = t.runProsecutor(ctx, candidate, codeCtx)
+		if prosErr == nil {
+			defResult, defErr = t.runDefender(ctx, candidate, codeCtx)
+		}
+	}
+
+	if prosErr != nil {
+		return nil, fmt.Errorf("prosecutor failed: %w", prosErr)
+	}
+	if defErr != nil {
+		return nil, fmt.Errorf("defender failed: %w", defErr)
+	}
+
+	judgeResult, err := t.runJudge(ctx, candidate, codeCtx, prosResult, defResult)
+	if err != nil {
+		return nil, fmt.Errorf("judge failed: %w", err)
+	}
+
+	return &TribunalResult{
+		Prosecutor: prosResult,
+		Defender:   defResult,
+		Judge:      judgeResult,
+	}, nil
 }
 
 // VerifyDeep runs the Prosecutor-Defender-Judge cycle with an expanded context level.
@@ -401,6 +457,16 @@ func (t *Tribunal) buildProsecutorMessage(candidate *cpg.Candidate, codeCtx *cpg
 		sb.WriteString("\n```\n\n")
 	}
 
+	// Add guided questions from rule
+	if len(candidate.GuidedQuestions) > 0 {
+		sb.WriteString("## Investigative Questions\n\n")
+		sb.WriteString("Use these questions to guide and focus your analysis:\n\n")
+		for i, q := range candidate.GuidedQuestions {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
+		}
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("**Your task**: Analyze whether this is a genuine exploitable vulnerability. Provide your verdict in JSON format as specified.\n")
 
 	return sb.String()
@@ -425,6 +491,16 @@ func (t *Tribunal) buildDefenderMessage(candidate *cpg.Candidate, codeCtx *cpg.C
 		sb.WriteString("\n")
 	}
 
+	// Add known sanitizer patterns from rule
+	if len(candidate.Sanitizers) > 0 {
+		sb.WriteString("## Known Sanitizer Patterns\n\n")
+		sb.WriteString("The following patterns are known mitigations for this vulnerability type. Check if any are present:\n\n")
+		for i, s := range candidate.Sanitizers {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, s))
+		}
+		sb.WriteString("\n")
+	}
+
 	// Add code context
 	sb.WriteString("## Code Context\n\n")
 	for _, slice := range codeCtx.Slices {
@@ -432,6 +508,16 @@ func (t *Tribunal) buildDefenderMessage(candidate *cpg.Candidate, codeCtx *cpg.C
 		sb.WriteString("```\n")
 		sb.WriteString(slice.Code)
 		sb.WriteString("\n```\n\n")
+	}
+
+	// Add guided questions from rule
+	if len(candidate.GuidedQuestions) > 0 {
+		sb.WriteString("## Investigative Questions\n\n")
+		sb.WriteString("Consider these questions when searching for defenses:\n\n")
+		for i, q := range candidate.GuidedQuestions {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
+		}
+		sb.WriteString("\n")
 	}
 
 	sb.WriteString("**Your task**: Search for defenses or constraints that make this vulnerability safe or unexploitable. Provide your verdict in JSON format as specified.\n")
@@ -468,6 +554,16 @@ func (t *Tribunal) buildJudgeMessage(candidate *cpg.Candidate, codeCtx *cpg.Cont
 		sb.WriteString("```\n")
 		sb.WriteString(slice.Code)
 		sb.WriteString("\n```\n\n")
+	}
+
+	// Add guided questions for the Judge to consider
+	if len(candidate.GuidedQuestions) > 0 {
+		sb.WriteString("## Key Questions to Consider\n\n")
+		sb.WriteString("Evaluate both arguments against these rule-specific questions:\n\n")
+		for i, q := range candidate.GuidedQuestions {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
+		}
+		sb.WriteString("\n")
 	}
 
 	sb.WriteString("**Your task**: Based on both arguments above, make a final verdict. Provide your ruling in JSON format as specified.\n")

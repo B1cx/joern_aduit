@@ -42,15 +42,17 @@ type TaintPath struct {
 
 // Candidate is a potential vulnerability alert from Joern scanning.
 type Candidate struct {
-	ID           int64           `json:"id"`
-	RuleID       string          `json:"rule_id"`
-	Severity     string          `json:"severity"`
-	FilePath     string          `json:"file_path"`
-	LineNumber   int             `json:"line_number"`
-	Message      string          `json:"message"`
-	CPGEvidence  *CPGEvidence    `json:"cpg_evidence,omitempty"`
-	Status       CandidateStatus `json:"status"`
-	Confidence   float64         `json:"confidence"`
+	ID              int64           `json:"id"`
+	RuleID          string          `json:"rule_id"`
+	Severity        string          `json:"severity"`
+	FilePath        string          `json:"file_path"`
+	LineNumber      int             `json:"line_number"`
+	Message         string          `json:"message"`
+	CPGEvidence     *CPGEvidence    `json:"cpg_evidence,omitempty"`
+	Status          CandidateStatus `json:"status"`
+	Confidence      float64         `json:"confidence"`
+	GuidedQuestions []string        `json:"guided_questions,omitempty"`
+	Sanitizers      []string        `json:"sanitizers,omitempty"`
 }
 
 type CPGEvidence struct {
