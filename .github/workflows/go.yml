@@ -99,12 +99,14 @@ jobs:
           else
             tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
           fi
+          rm -rf "${ARCHIVE_NAME}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: ${{ env.BINARY_NAME }}_*.*
+          path: ${{ env.BINARY_NAME }}_*.tar.gz
+                ${{ env.BINARY_NAME }}_*.zip
           retention-days: 1
 
   # ── only on v* tag: publish release ──
@@ -124,12 +126,9 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Flatten and generate checksums
+      - name: Generate checksums
         working-directory: dist
-        run: |
-          find . -mindepth 2 -type f -exec mv -t . {} +
-          rm -rf */
-          sha256sum * > checksums_sha256.txt
+        run: sha256sum *.tar.gz *.zip > checksums_sha256.txt
 
       - name: Generate changelog
         id: changelog
