@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/joern-audit/joern_audit/internal/cpg"
 	"github.com/joern-audit/joern_audit/internal/db"
+	"github.com/joern-audit/joern_audit/internal/domain"
 )
 
 // SQLiteStore implements the Store interface backed by SQLite.
@@ -17,7 +17,6 @@ type SQLiteStore struct {
 	mu        sync.Mutex
 }
 
-// NewSQLiteStore creates a new SQLite-backed evidence store.
 func NewSQLiteStore(database *db.DB, sessionID string) *SQLiteStore {
 	return &SQLiteStore{db: database, sessionID: sessionID}
 }
@@ -116,8 +115,6 @@ func (s *SQLiteStore) UpdateStatus(candidateID string, status string) error {
 	return err
 }
 
-// --- helpers ---
-
 func statusFromRecord(rec *Record) string {
 	if rec.FuzzVerify != nil && rec.FuzzVerify.Result == "CONFIRMED" {
 		return "fuzz_confirmed"
@@ -176,19 +173,19 @@ func deserializeRecord(candidateID, ruleID, filePath string, lineNumber int,
 	}
 
 	if cpgJSON != "" && cpgJSON != "null" {
-		var ev cpg.CPGEvidence
+		var ev domain.CPGEvidence
 		if err := json.Unmarshal([]byte(cpgJSON), &ev); err == nil {
 			rec.CPGEvidence = &ev
 		}
 	}
 	if llmJSON != "" && llmJSON != "null" {
-		var llm LLMVerification
+		var llm domain.LLMVerification
 		if err := json.Unmarshal([]byte(llmJSON), &llm); err == nil {
 			rec.LLMVerify = &llm
 		}
 	}
 	if fuzzJSON != "" && fuzzJSON != "null" {
-		var fuzz FuzzVerification
+		var fuzz domain.FuzzVerification
 		if err := json.Unmarshal([]byte(fuzzJSON), &fuzz); err == nil {
 			rec.FuzzVerify = &fuzz
 		}

@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/joern-audit/joern_audit/internal/domain"
 )
 
 // ContextLevel defines the granularity of code context extraction.
@@ -32,7 +34,7 @@ type CodeSlice struct {
 
 // ContextRequest specifies what context is needed for a candidate.
 type ContextRequest struct {
-	Candidate *Candidate
+	Candidate *domain.Candidate
 	Level     ContextLevel
 	Needs     []string // specific symbols/functions to resolve (for Level 2+)
 }

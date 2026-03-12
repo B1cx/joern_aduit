@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/joern-audit/joern_audit/internal/evidence"
+	"github.com/joern-audit/joern_audit/internal/domain"
 )
 
 // Manager handles report generation in multiple formats.
@@ -16,7 +16,6 @@ type Manager struct {
 	outputDir  string
 }
 
-// NewManager creates a new report manager with all available generators.
 func NewManager(outputDir string) *Manager {
 	return &Manager{
 		generators: map[string]Generator{
@@ -31,7 +30,6 @@ func NewManager(outputDir string) *Manager {
 
 // Generate creates reports in the specified formats.
 func (m *Manager) Generate(ctx context.Context, data *ReportData, formats []string) (map[string]string, error) {
-	// Ensure output directory exists
 	if err := os.MkdirAll(m.outputDir, 0755); err != nil {
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
@@ -44,36 +42,32 @@ func (m *Manager) Generate(ctx context.Context, data *ReportData, formats []stri
 			return nil, fmt.Errorf("unknown format: %s", format)
 		}
 
-		// Generate report
 		content, err := generator.Generate(ctx, data)
 		if err != nil {
 			return nil, fmt.Errorf("generate %s report: %w", format, err)
 		}
 
-		// Determine file extension
 		ext := format
 		if format == "markdown" || format == "markdown-zh" {
 			ext = "md"
 		}
 
-		// Create filename with timestamp
 		filename := fmt.Sprintf("audit_report_%s.%s",
 			time.Now().Format("20060102_150405"), ext)
-		filepath := filepath.Join(m.outputDir, filename)
+		fpath := filepath.Join(m.outputDir, filename)
 
-		// Write to file
-		if err := os.WriteFile(filepath, content, 0644); err != nil {
+		if err := os.WriteFile(fpath, content, 0644); err != nil {
 			return nil, fmt.Errorf("write %s report: %w", format, err)
 		}
 
-		results[format] = filepath
+		results[format] = fpath
 	}
 
 	return results, nil
 }
 
 // BuildReportData constructs ReportData from evidence records.
-func BuildReportData(sessionID, target, scanMode string, languages []string, records []*evidence.Record) *ReportData {
+func BuildReportData(sessionID, target, scanMode string, languages []string, records []*domain.Record) *ReportData {
 	data := &ReportData{
 		SessionID: sessionID,
 		Target:    target,
@@ -84,7 +78,6 @@ func BuildReportData(sessionID, target, scanMode string, languages []string, rec
 		Coverage:  CoverageMatrix{Dimensions: []DimensionCoverage{}},
 	}
 
-	// Calculate summary statistics
 	data.Summary.TotalCandidates = len(records)
 	for _, rec := range records {
 		if rec.LLMVerify != nil && rec.LLMVerify.Judge != nil {
@@ -97,7 +90,6 @@ func BuildReportData(sessionID, target, scanMode string, languages []string, rec
 				data.Summary.NeedDeeper++
 			}
 
-			// Count by severity
 			switch rec.FinalSeverity {
 			case "CRITICAL":
 				data.Summary.Critical++
@@ -112,7 +104,6 @@ func BuildReportData(sessionID, target, scanMode string, languages []string, rec
 			}
 		}
 
-		// Count fuzz confirmed
 		if rec.FuzzVerify != nil && rec.FuzzVerify.Result == "CONFIRMED" {
 			data.Summary.FuzzConfirmed++
 		}

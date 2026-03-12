@@ -3,13 +3,11 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
-	"github.com/joern-audit/joern_audit/internal/evidence"
+	"github.com/joern-audit/joern_audit/internal/domain"
 	"github.com/joern-audit/joern_audit/internal/llm"
-	"github.com/joern-audit/joern_audit/internal/verifier"
+	"github.com/joern-audit/joern_audit/internal/shared"
 )
 
 // ChainStep is one step in an attack chain.
@@ -41,28 +39,26 @@ type AttackChainResponse struct {
 
 // ChainAnalyzer performs attack chain correlation on confirmed findings.
 type ChainAnalyzer struct {
-	provider   llm.Provider
-	promptsDir string
+	provider llm.Provider
+	prompts  *shared.PromptLoader
 }
 
-// NewChainAnalyzer creates a new attack chain analyzer.
-func NewChainAnalyzer(provider llm.Provider, promptsDir string) *ChainAnalyzer {
+func NewChainAnalyzer(provider llm.Provider, prompts *shared.PromptLoader) *ChainAnalyzer {
 	return &ChainAnalyzer{
-		provider:   provider,
-		promptsDir: promptsDir,
+		provider: provider,
+		prompts:  prompts,
 	}
 }
 
 // Analyze takes confirmed findings and produces attack chains.
-func (ca *ChainAnalyzer) Analyze(ctx context.Context, records []*evidence.Record) (*AttackChainResponse, error) {
-	// Filter to confirmed findings only
-	var confirmed []*evidence.Record
+func (ca *ChainAnalyzer) Analyze(ctx context.Context, records []*domain.Record) (*AttackChainResponse, error) {
+	var confirmed []*domain.Record
 	for _, rec := range records {
 		if rec.LLMVerify == nil || rec.LLMVerify.Judge == nil {
 			continue
 		}
 		v := rec.LLMVerify.Judge.Verdict
-		if v == verifier.VerdictTruePositive || v == verifier.VerdictConditional {
+		if v == domain.VerdictTruePositive || v == domain.VerdictConditional {
 			confirmed = append(confirmed, rec)
 		}
 	}
@@ -73,13 +69,11 @@ func (ca *ChainAnalyzer) Analyze(ctx context.Context, records []*evidence.Record
 		}, nil
 	}
 
-	// Load prompt
-	promptTemplate, err := ca.loadPrompt("attack_chain.md")
+	promptTemplate, err := ca.prompts.Load("attack_chain.md")
 	if err != nil {
 		return nil, fmt.Errorf("load attack_chain prompt: %w", err)
 	}
 
-	// Build user message
 	userMessage := ca.buildMessage(confirmed)
 
 	req := llm.ChatRequest{
@@ -101,7 +95,7 @@ func (ca *ChainAnalyzer) Analyze(ctx context.Context, records []*evidence.Record
 	return &response, nil
 }
 
-func (ca *ChainAnalyzer) buildMessage(records []*evidence.Record) string {
+func (ca *ChainAnalyzer) buildMessage(records []*domain.Record) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Confirmed Vulnerabilities for Chain Analysis\n\n")
@@ -135,13 +129,4 @@ func (ca *ChainAnalyzer) buildMessage(records []*evidence.Record) string {
 	sb.WriteString("**Your task**: Analyze the relationships between these confirmed vulnerabilities and identify attack chains. Return your analysis in the JSON format specified.\n")
 
 	return sb.String()
-}
-
-func (ca *ChainAnalyzer) loadPrompt(filename string) (string, error) {
-	path := filepath.Join(ca.promptsDir, filename)
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", fmt.Errorf("read prompt %s: %w", filename, err)
-	}
-	return string(data), nil
 }

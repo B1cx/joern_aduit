@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/joern-audit/joern_audit/internal/config"
+	"github.com/joern-audit/joern_audit/internal/domain"
 )
 
 // Engine manages Joern CPG lifecycle: parse, index, query, slice.
@@ -192,7 +193,7 @@ func (e *Engine) Query(ctx context.Context, cpgql string) ([]QueryResult, error)
 }
 
 // Scan runs joern-scan with rule files and returns candidate alerts.
-func (e *Engine) Scan(ctx context.Context, rulesDir string) ([]Candidate, error) {
+func (e *Engine) Scan(ctx context.Context, rulesDir string) ([]domain.Candidate, error) {
 	// For now, we'll implement custom rule scanning using Query()
 	// joern-scan's built-in queries may not match our needs
 	return nil, fmt.Errorf("Scan not yet implemented - use custom CPGQL queries via Query()")
@@ -205,7 +206,7 @@ func (e *Engine) Slice(ctx context.Context, req SliceRequest) (*SliceResult, err
 	return nil, fmt.Errorf("Slice not yet implemented - use Flow() for data flow analysis")
 }
 
-// Flow traces taint flow between source and sink.
+// Flow traces taint flow between source and sink using Joern's reachableByFlows.
 func (e *Engine) Flow(ctx context.Context, source, sink string) ([]TaintPath, error) {
 	if e.cpgBin == "" {
 		return nil, fmt.Errorf("CPG not parsed yet")
@@ -367,7 +368,7 @@ func (e *Engine) parseIndexOutput(output string, store IndexStore) error {
 // parseFlowOutput parses taint flow paths from script output
 func (e *Engine) parseFlowOutput(output string) []TaintPath {
 	var paths []TaintPath
-	var currentPath []TaintFlowNode
+	var currentPath []domain.TaintFlowNode
 
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	inFlow := false
@@ -377,7 +378,7 @@ func (e *Engine) parseFlowOutput(output string) []TaintPath {
 
 		if line == "FLOW_BEGIN" {
 			inFlow = true
-			currentPath = []TaintFlowNode{}
+			currentPath = []domain.TaintFlowNode{}
 			continue
 		}
 		if line == "FLOW_END" {
@@ -395,12 +396,11 @@ func (e *Engine) parseFlowOutput(output string) []TaintPath {
 			parts := strings.SplitN(line, "|", 3)
 			if len(parts) >= 3 {
 				lineNum, _ := strconv.Atoi(parts[1])
-				node := TaintFlowNode{
+				node := domain.TaintFlowNode{
 					File: parts[0],
 					Line: lineNum,
 					Expr: parts[2],
 				}
-				// Determine node type based on position
 				if len(currentPath) == 0 {
 					node.NodeType = "SOURCE"
 				} else {
@@ -411,7 +411,6 @@ func (e *Engine) parseFlowOutput(output string) []TaintPath {
 		}
 	}
 
-	// Mark last node in each path as SINK
 	for i := range paths {
 		if len(paths[i].Nodes) > 0 {
 			paths[i].Nodes[len(paths[i].Nodes)-1].NodeType = "SINK"

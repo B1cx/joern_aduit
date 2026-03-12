@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/joern-audit/joern_audit/internal/config"
-	"github.com/joern-audit/joern_audit/internal/evidence"
-	"github.com/joern-audit/joern_audit/internal/verifier"
+	"github.com/joern-audit/joern_audit/internal/domain"
+	"github.com/joern-audit/joern_audit/internal/shared"
 )
 
 // Manager orchestrates fuzz verification across all registered strategies.
@@ -20,7 +20,6 @@ type Manager struct {
 	registry   *EndpointRegistry
 }
 
-// NewManager creates a Manager and registers all built-in strategies.
 func NewManager(cfg *config.FuzzerConfig) *Manager {
 	return &Manager{
 		cfg:        cfg,
@@ -28,8 +27,7 @@ func NewManager(cfg *config.FuzzerConfig) *Manager {
 	}
 }
 
-// SetSourceRoot sets the source code root and triggers a project scan
-// to build the endpoint registry.
+// SetSourceRoot sets the source code root and triggers endpoint scanning.
 func (m *Manager) SetSourceRoot(root string) {
 	m.sourceRoot = root
 	if root != "" {
@@ -38,8 +36,7 @@ func (m *Manager) SetSourceRoot(root string) {
 }
 
 // RunAll runs fuzz verification on all eligible records.
-// Returns counts of confirmed, failed, and errored attempts.
-func (m *Manager) RunAll(ctx context.Context, records []*evidence.Record) (confirmed, failed, errored int) {
+func (m *Manager) RunAll(ctx context.Context, records []*domain.Record) (confirmed, failed, errored int) {
 	if !m.preflightCheck(m.cfg.TargetURL) {
 		fmt.Printf("  ⚠️  目标不可达: %s，跳过 Fuzz 验证\n", m.cfg.TargetURL)
 		return 0, 0, 0
@@ -82,7 +79,7 @@ func (m *Manager) RunAll(ctx context.Context, records []*evidence.Record) (confi
 			continue
 		}
 
-		rec.FuzzVerify = &evidence.FuzzVerification{
+		rec.FuzzVerify = &domain.FuzzVerification{
 			Tool:     result.Tool,
 			PoC:      result.PoC,
 			Result:   string(result.Status),
@@ -91,13 +88,13 @@ func (m *Manager) RunAll(ctx context.Context, records []*evidence.Record) (confi
 
 		switch result.Status {
 		case FuzzConfirmed:
-			fmt.Printf("    ✅ CONFIRMED — %s\n", truncate(result.PoC, 100))
+			fmt.Printf("    ✅ CONFIRMED — %s\n", shared.Truncate(result.PoC, 100))
 			confirmed++
 		case FuzzPartial:
-			fmt.Printf("    ⚠️  PARTIAL — %s\n", truncate(result.ResponseDiff, 100))
+			fmt.Printf("    ⚠️  PARTIAL — %s\n", shared.Truncate(result.ResponseDiff, 100))
 			failed++
 		case FuzzFailed:
-			fmt.Printf("    ❌ FAILED — %s\n", truncate(result.ResponseDiff, 100))
+			fmt.Printf("    ❌ FAILED — %s\n", shared.Truncate(result.ResponseDiff, 100))
 			failed++
 		default:
 			fmt.Printf("    ❓ %s — %s\n", result.Status, result.Error)
@@ -112,14 +109,12 @@ func (m *Manager) RunAll(ctx context.Context, records []*evidence.Record) (confi
 	return confirmed, failed, errored
 }
 
-// --- Internal helpers ---
-
-func (m *Manager) isEligible(rec *evidence.Record) bool {
+func (m *Manager) isEligible(rec *domain.Record) bool {
 	if rec.LLMVerify == nil || rec.LLMVerify.Judge == nil {
 		return false
 	}
 	v := rec.LLMVerify.Judge.Verdict
-	return v == verifier.VerdictTruePositive || v == verifier.VerdictConditional
+	return v == domain.VerdictTruePositive || v == domain.VerdictConditional
 }
 
 func (m *Manager) findStrategy(cwe string) Strategy {
@@ -131,7 +126,7 @@ func (m *Manager) findStrategy(cwe string) Strategy {
 	return nil
 }
 
-func (m *Manager) buildPoCRequest(rec *evidence.Record) PoCRequest {
+func (m *Manager) buildPoCRequest(rec *domain.Record) PoCRequest {
 	req := PoCRequest{
 		CWE:        rec.CWE,
 		TargetURL:  m.cfg.TargetURL,
@@ -157,8 +152,8 @@ func (m *Manager) buildPoCRequest(rec *evidence.Record) PoCRequest {
 	return req
 }
 
-func (m *Manager) setFuzzResult(rec *evidence.Record, tool string, status FuzzStatus, poc, ev string) {
-	rec.FuzzVerify = &evidence.FuzzVerification{
+func (m *Manager) setFuzzResult(rec *domain.Record, tool string, status FuzzStatus, poc, ev string) {
+	rec.FuzzVerify = &domain.FuzzVerification{
 		Tool:     tool,
 		Result:   string(status),
 		PoC:      poc,
@@ -205,11 +200,4 @@ func (m *Manager) injectAuth(poc *PoCTemplate) {
 	for k, v := range m.cfg.Headers {
 		poc.Headers[k] = v
 	}
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }
