@@ -124,9 +124,12 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Generate checksums
+      - name: Flatten and generate checksums
         working-directory: dist
-        run: sha256sum * > checksums_sha256.txt
+        run: |
+          find . -mindepth 2 -type f -exec mv -t . {} +
+          rm -rf */
+          sha256sum * > checksums_sha256.txt
 
       - name: Generate changelog
         id: changelog
