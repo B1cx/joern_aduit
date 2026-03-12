@@ -1,6 +1,6 @@
 # ===== 编译产物 =====
-joern_audit
-joern_audit.exe
+/joern_audit
+/joern_audit.exe
 bin/
 
 #===== 扫描运行时产物 =====
